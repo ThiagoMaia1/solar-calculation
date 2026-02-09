@@ -221,6 +221,15 @@ describe('calculateMemberResults', () => {
     expect(result.resultado).toBe(75);
     expect(result.cobrar).toBe(65);
   });
+
+  it('returns zeros for resultado and cobrar when taxas is 0 (no taxes)', () => {
+    const credits: MemberCredits = { consumo: 200, taxas: 0 };
+    const result = calculateMemberResults(credits, 0.75);
+    expect(result.consumo).toBe(200);
+    expect(result.taxas).toBe(0);
+    expect(result.resultado).toBe(0);
+    expect(result.cobrar).toBe(0);
+  });
 });
 
 // ──────────────────────────────────────────────
@@ -451,7 +460,9 @@ describe('computeMonthValues', () => {
     const result = computeMonthValues('2024-01', data);
 
     expect(result!.energyValue).toBe(0);
-    // economyEnergy(50) + ganhoCreditos(0) + resultadoParentes(taxas only: 10+8=18) + economiaPropria(0)
+    // With taxas present (10 and 8), cobrar = resultado(0) + taxas
+    // pai: cobrar = (200*0)+10 = 10, mae: cobrar = (150*0)+8 = 8
+    // economyEnergy(50) + ganhoCreditos(0) + resultadoParentes(10+8=18) + economiaPropria(0)
     expect(result!.totalGains).toBe(68);
   });
 

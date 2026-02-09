@@ -39,6 +39,8 @@ export default function InvoiceForm({
         {({ values }) => {
           const selectedMonth = months[values.monthKey];
           const selectedMember = members.find((m) => m.id === values.memberId);
+          const memberTaxas = selectedMonth?.credits?.[values.memberId]?.taxas ?? 0;
+          const hasTaxas = memberTaxas !== 0;
 
           return (
             <Form className="space-y-4">
@@ -86,9 +88,16 @@ export default function InvoiceForm({
                 />
               )}
 
+              {!hasTaxas && selectedMonth && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800">
+                  <strong>Atenção:</strong> Não há taxas cadastradas para este membro neste mês.
+                  Preencha as taxas da Enel antes de gerar a fatura.
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={generating}
+                disabled={generating || !hasTaxas}
                 className="w-full px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 font-medium transition-colors"
               >
                 {generating ? 'Gerando...' : 'Gerar Fatura PDF'}

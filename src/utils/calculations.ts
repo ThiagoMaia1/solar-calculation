@@ -48,6 +48,9 @@ export function getEquipmentWithDepreciation(
  * Calculate results for a family member.
  * resultado = consumo × energyValue (the credit value)
  * cobrar = resultado + taxas (total to charge them)
+ *
+ * When taxas is 0 or missing, we skip the calculation because the Enel bill
+ * data has not been entered yet and the result would be incorrect.
  */
 export function calculateMemberResults(
   memberCredits: MemberCredits | undefined,
@@ -55,6 +58,12 @@ export function calculateMemberResults(
 ): MemberResult {
   const consumo = memberCredits?.consumo ?? 0;
   const taxas = memberCredits?.taxas ?? 0;
+
+  // Without taxes the calculation is incomplete — return zeros for computed fields
+  if (taxas === 0) {
+    return { consumo, taxas: 0, resultado: 0, cobrar: 0 };
+  }
+
   const resultado = consumo * energyValue;
   const cobrar = resultado + taxas;
   return { consumo, taxas, resultado, cobrar };

@@ -14,6 +14,7 @@ export default function InvoiceSummary({ member, monthData, monthKey }: InvoiceS
   if (!memberCredits) return null;
 
   const result = calculateMemberResults(memberCredits, energyValue);
+  const hasTaxas = (memberCredits.taxas ?? 0) !== 0;
 
   return (
     <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-1">
@@ -23,15 +24,23 @@ export default function InvoiceSummary({ member, monthData, monthKey }: InvoiceS
       <p className="text-gray-600">
         Consumo: <span className="font-medium">{result.consumo} kWh</span>
       </p>
-      <p className="text-gray-600">
-        Valor créditos: <span className="font-medium">{formatBRL(result.resultado)}</span>
-      </p>
-      <p className="text-gray-600">
-        Taxas: <span className="font-medium">{formatBRL(result.taxas)}</span>
-      </p>
-      <p className="text-gray-800 font-bold">
-        Total a cobrar: {formatBRL(result.cobrar)}
-      </p>
+      {hasTaxas ? (
+        <>
+          <p className="text-gray-600">
+            Valor créditos: <span className="font-medium">{formatBRL(result.resultado)}</span>
+          </p>
+          <p className="text-gray-600">
+            Taxas: <span className="font-medium">{formatBRL(result.taxas)}</span>
+          </p>
+          <p className="text-gray-800 font-bold">
+            Total a cobrar: {formatBRL(result.cobrar)}
+          </p>
+        </>
+      ) : (
+        <p className="text-yellow-700 font-medium italic">
+          Sem taxas — cálculo indisponível
+        </p>
+      )}
     </div>
   );
 }
