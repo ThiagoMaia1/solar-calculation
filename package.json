@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://thiagomaia.github.io/solar-calculation/",
+  "homepage": "https://thiagomaia1.github.io/solar-calculation/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
