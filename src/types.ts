@@ -117,4 +117,5 @@ export interface PdfPreview {
   filename: string;
   member: string;
   monthKey: string;
+  pixPayload?: string;
 }

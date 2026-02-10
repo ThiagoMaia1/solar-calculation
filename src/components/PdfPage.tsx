@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAppData } from '../hooks/useAppData';
 import { generateMemberInvoice } from '../utils/pdfGenerator';
+import { buildPixPayload } from '../utils/pixQrCode';
 import InvoiceForm from './InvoiceForm';
 import PdfPreviewPanel from './PdfPreviewPanel';
 import type { PdfPreview } from '../types';
@@ -52,12 +53,29 @@ export default function PdfPage() {
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
 
+      // Build PIX copia-e-cola payload if pix is configured
+      let pixPayload: string | undefined;
+      if (settings.pix) {
+        const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
+        const energyValue = monthData.energyValue ?? 0;
+        const totalAPagar = credits.consumo * energyValue + credits.taxas;
+        if (totalAPagar > 0) {
+          pixPayload = buildPixPayload({
+            pixKey: settings.pix.key,
+            merchantName: settings.pix.merchantName,
+            merchantCity: settings.pix.merchantCity,
+            amount: totalAPagar,
+          });
+        }
+      }
+
       if (preview) URL.revokeObjectURL(preview.url);
       setPreview({
         url,
         filename: `fatura-${member.name.toLowerCase()}-${values.monthKey}.pdf`,
         member: member.name,
         monthKey: values.monthKey,
+        pixPayload,
       });
     } catch (err) {
       alert('Erro ao gerar PDF: ' + (err instanceof Error ? err.message : 'Unknown'));

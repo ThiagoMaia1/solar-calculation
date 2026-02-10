@@ -2,6 +2,8 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { formatMonthLabel } from '../utils/calculations';
 import type { PdfPreview } from '../types';
 
+type CopyState = 'idle' | 'copied' | 'error';
+
 interface PdfPreviewPanelProps {
   preview: PdfPreview | null;
 }
@@ -33,12 +35,26 @@ export default function PdfPreviewPanel({ preview }: PdfPreviewPanelProps) {
     return () => observer.disconnect();
   }, [updateHeight]);
 
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+
   const handleDownload = () => {
     if (!preview) return;
     const a = document.createElement('a');
     a.href = preview.url;
     a.download = preview.filename;
     a.click();
+  };
+
+  const handleCopyPix = async () => {
+    if (!preview?.pixPayload) return;
+    try {
+      await navigator.clipboard.writeText(preview.pixPayload);
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 2000);
+    } catch {
+      setCopyState('error');
+      setTimeout(() => setCopyState('idle'), 2000);
+    }
   };
 
   return (
@@ -52,12 +68,32 @@ export default function PdfPreviewPanel({ preview }: PdfPreviewPanelProps) {
               <span className="font-medium">{preview.member}</span> —{' '}
               {formatMonthLabel(preview.monthKey)}
             </p>
-            <button
-              onClick={handleDownload}
-              className="ml-4 px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
-            >
-              ⬇ Download
-            </button>
+            <div className="flex items-center gap-2 ml-4">
+              {preview.pixPayload && (
+                <button
+                  onClick={handleCopyPix}
+                  className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+                    copyState === 'copied'
+                      ? 'bg-emerald-500 text-white'
+                      : copyState === 'error'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {copyState === 'copied'
+                    ? '✓ Copiado!'
+                    : copyState === 'error'
+                      ? '✗ Erro'
+                      : '📋 Copiar PIX'}
+                </button>
+              )}
+              <button
+                onClick={handleDownload}
+                className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
+              >
+                ⬇ Download
+              </button>
+            </div>
           </div>
           <iframe
             src={`${preview.url}#toolbar=0&navpanes=0`}
