@@ -27,6 +27,9 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_JSONBIN_BIN_ID: ${{ secrets.VITE_JSONBIN_BIN_ID }}
+          VITE_JSONBIN_API_KEY: ${{ secrets.VITE_JSONBIN_API_KEY }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
