@@ -20,8 +20,8 @@ export interface Settings {
   enelTariff: number;
   startDate: string; // "YYYY-MM"
   pix?: PixConfig;
-  /** Estimated variable tax per kWh on Enel bill (ICMS/PIS/COFINS that remain with solar) */
-  estimatedTaxPerKwh?: number;
+  /** Non-compensated distribution fee per kWh charged by Enel on solar credit bills */
+  distributionFeePerKwh?: number;
 }
 
 export interface Member {

@@ -47,7 +47,7 @@ export default function PdfPage() {
         monthKey: values.monthKey,
         enelTariff: settings.enelTariff,
         pix: settings.pix,
-        estimatedTaxPerKwh: settings.estimatedTaxPerKwh,
+        distributionFeePerKwh: settings.distributionFeePerKwh ?? (settings as unknown as Record<string, unknown>).estimatedTaxPerKwh as number | undefined,
       });
 
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });

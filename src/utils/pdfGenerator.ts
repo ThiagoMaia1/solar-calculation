@@ -38,8 +38,8 @@ interface InvoiceParams {
   enelTariff: number;
   ownerName?: string;
   pix?: PixConfig;
-  /** Estimated variable tax per kWh (ICMS/PIS/COFINS on Enel bill with solar) */
-  estimatedTaxPerKwh?: number;
+  /** Non-compensated distribution fee per kWh charged by Enel on solar credit bills */
+  distributionFeePerKwh?: number;
 }
 
 /**
@@ -52,7 +52,7 @@ export async function generateMemberInvoice({
   enelTariff,
   ownerName = 'Thiago Pereira Maia',
   pix,
-  estimatedTaxPerKwh,
+  distributionFeePerKwh,
 }: InvoiceParams): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
@@ -68,10 +68,10 @@ export async function generateMemberInvoice({
   const valorCreditos = consumo * energyValue;
   const totalAPagar = valorCreditos + taxas;
 
-  const taxPerKwh = estimatedTaxPerKwh ?? 0;
-  const impostosConsumo = Math.min(consumo * taxPerKwh, taxas);
-  const taxasGerais = taxas - impostosConsumo;
-  const valorSemDesconto = taxas + consumo * (enelTariff - taxPerKwh);
+  const distFee = distributionFeePerKwh ?? 0;
+  const taxaDistribuicao = Math.min(consumo * distFee, taxas);
+  const taxasGerais = taxas - taxaDistribuicao;
+  const valorSemDesconto = taxas + consumo * (enelTariff - distFee);
   const economia = valorSemDesconto - totalAPagar;
 
   const margin = 50;
@@ -176,25 +176,22 @@ export async function generateMemberInvoice({
   drawLine(y, COLORS.lightGray);
   y -= 18;
 
-  // Rows: Enel taxes (estimated breakdown)
+  // Rows: Enel charges breakdown
   if (taxas !== 0) {
-    if (estimatedTaxPerKwh && consumo > 0) {
-      const impostosConsumo = Math.min(consumo * estimatedTaxPerKwh, taxas);
-      const taxasGerais = taxas - impostosConsumo;
-
-      // Row: variable taxes (ICMS/PIS/COFINS)
-      drawText('Impostos sobre consumo (est.)', margin, y, { size: 10 });
-      drawText(`${consumo} kWh x ${formatCurrency(estimatedTaxPerKwh)}`, 260, y, {
+    if (distributionFeePerKwh && consumo > 0) {
+      // Row: distribution fee (non-compensated per-kWh charge)
+      drawText('Taxa de distribuicao', margin, y, { size: 10 });
+      drawText(`${consumo} kWh x ${formatCurrency(distributionFeePerKwh)}`, 260, y, {
         size: 8, color: COLORS.gray,
       });
-      drawText(formatCurrency(impostosConsumo), width - margin - 80, y, { size: 10 });
+      drawText(formatCurrency(taxaDistribuicao), width - margin - 80, y, { size: 10 });
       y -= 5;
       drawLine(y, COLORS.lightGray);
       y -= 18;
 
-      // Row: fixed taxes (CIP, iluminação pública, etc.)
+      // Row: remaining taxes (CIP, iluminação pública, etc.)
       if (taxasGerais > 0) {
-        drawText('Taxas gerais Enel (est.)', margin, y, { size: 10 });
+        drawText('Demais taxas Enel (est.)', margin, y, { size: 10 });
         drawText('CIP, ilum. publica, etc.', 260, y, {
           size: 8, color: COLORS.gray,
         });
@@ -204,7 +201,7 @@ export async function generateMemberInvoice({
         y -= 18;
       }
     } else {
-      // Fallback: single line if no estimate available
+      // Fallback: single line if no breakdown available
       drawText('Taxas da Enel', margin, y, { size: 10 });
       drawText(formatCurrency(taxas), width - margin - 80, y, { size: 10 });
       y -= 5;
@@ -232,7 +229,7 @@ export async function generateMemberInvoice({
 
   // Without solar
   drawText('Valor SEM creditos solares (tarifa Enel)', margin, y, { size: 10 });
-  drawText(`${consumo} kWh x ${formatCurrency(enelTariff - taxPerKwh)} + ${formatCurrency(taxas)}`, 250, y, {
+  drawText(`${consumo} kWh x ${formatCurrency(enelTariff - distFee)} + ${formatCurrency(taxas)}`, 250, y, {
     size: 8, color: COLORS.gray,
   });
   drawText(formatCurrency(valorSemDesconto), width - margin - 80, y, { size: 10 });
