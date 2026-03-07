@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchData, saveAllData } from '../utils/api';
-import type { AppData, Member, MonthData } from '../types';
+import type { AppData, Member, MonthData, Settings } from '../types';
 
 export const QUERY_KEY = ['appData'] as const;
 
@@ -69,6 +69,39 @@ export function useSaveMembers() {
       const previous = qc.getQueryData<AppData>(QUERY_KEY);
       if (previous) {
         qc.setQueryData<AppData>(QUERY_KEY, { ...previous, members });
+      }
+      return { previous };
+    },
+
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(QUERY_KEY, context.previous);
+      }
+    },
+
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
+/** Save updated settings with optimistic cache update */
+export function useSaveSettings() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (settings: Settings) => {
+      const prev = qc.getQueryData<AppData>(QUERY_KEY);
+      if (!prev) throw new Error('No cached data');
+      const next: AppData = { ...prev, settings };
+      return saveAllData(next);
+    },
+
+    onMutate: async (settings: Settings) => {
+      await qc.cancelQueries({ queryKey: QUERY_KEY });
+      const previous = qc.getQueryData<AppData>(QUERY_KEY);
+      if (previous) {
+        qc.setQueryData<AppData>(QUERY_KEY, { ...previous, settings });
       }
       return { previous };
     },

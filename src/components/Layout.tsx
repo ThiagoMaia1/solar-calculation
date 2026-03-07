@@ -9,6 +9,7 @@ const navItems: NavItem[] = [
   { path: '/', label: 'Painel Financeiro' },
   { path: '/membros', label: 'Membros' },
   { path: '/pdf', label: 'Gerar Fatura' },
+  { path: '/configuracoes', label: 'Configuracoes' },
 ];
 
 export default function Layout() {
