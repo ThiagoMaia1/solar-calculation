@@ -71,7 +71,7 @@ export async function generateMemberInvoice({
   const taxPerKwh = estimatedTaxPerKwh ?? 0;
   const impostosConsumo = Math.min(consumo * taxPerKwh, taxas);
   const taxasGerais = taxas - impostosConsumo;
-  const valorSemDesconto = taxasGerais + consumo * (enelTariff - taxPerKwh);
+  const valorSemDesconto = taxas + consumo * (enelTariff - taxPerKwh);
   const economia = valorSemDesconto - totalAPagar;
 
   const margin = 50;
@@ -232,7 +232,7 @@ export async function generateMemberInvoice({
 
   // Without solar
   drawText('Valor SEM creditos solares (tarifa Enel)', margin, y, { size: 10 });
-  drawText(`${consumo} kWh x ${formatCurrency(enelTariff - taxPerKwh)} + ${formatCurrency(taxasGerais)}`, 250, y, {
+  drawText(`${consumo} kWh x ${formatCurrency(enelTariff - taxPerKwh)} + ${formatCurrency(taxas)}`, 250, y, {
     size: 8, color: COLORS.gray,
   });
   drawText(formatCurrency(valorSemDesconto), width - margin - 80, y, { size: 10 });
