@@ -67,7 +67,7 @@ export async function generateMemberInvoice({
   const taxas = credits.taxas ?? 0;
   const valorCreditos = consumo * energyValue;
   const totalAPagar = valorCreditos + taxas;
-  const valorSemDesconto = consumo * enelTariff + taxas;
+  const valorSemDesconto = consumo * enelTariff;
   const economia = valorSemDesconto - totalAPagar;
 
   const margin = 50;
