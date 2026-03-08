@@ -160,18 +160,25 @@ export async function generateMemberInvoice({
   drawLine(y, COLORS.primary);
   y -= 20;
 
+  // Table column positions
+  const colQty = 270;
+  const colUnit = 360;
+  const colVal = width - margin - 70;
+
   // Table header
   drawText('Descricao', margin, y, { size: 8, bold: true, color: COLORS.gray });
-  drawText('Quantidade', 300, y, { size: 8, bold: true, color: COLORS.gray });
-  drawText('Valor', width - margin - 80, y, { size: 8, bold: true, color: COLORS.gray });
+  drawText('Quantidade', colQty, y, { size: 8, bold: true, color: COLORS.gray });
+  drawText('Preco unit.', colUnit, y, { size: 8, bold: true, color: COLORS.gray });
+  drawText('Valor', colVal, y, { size: 8, bold: true, color: COLORS.gray });
   y -= 5;
   drawLine(y, COLORS.lightGray);
   y -= 18;
 
   // Row: energy credits
   drawText('Energia compensada (creditos solares)', margin, y, { size: 10 });
-  drawText(`${consumo} kWh`, 300, y, { size: 10 });
-  drawText(formatCurrency(valorCreditos), width - margin - 80, y, { size: 10 });
+  drawText(`${consumo} kWh`, colQty, y, { size: 10 });
+  drawText(`${formatCurrency(energyValue)}/kWh`, colUnit, y, { size: 9 });
+  drawText(formatCurrency(valorCreditos), colVal, y, { size: 10 });
   y -= 5;
   drawLine(y, COLORS.lightGray);
   y -= 18;
@@ -181,10 +188,9 @@ export async function generateMemberInvoice({
     if (distributionFeePerKwh && consumo > 0) {
       // Row: distribution fee (non-compensated per-kWh charge)
       drawText('Taxa de distribuicao', margin, y, { size: 10 });
-      drawText(`${consumo} kWh x ${formatCurrency(distributionFeePerKwh)}`, 260, y, {
-        size: 8, color: COLORS.gray,
-      });
-      drawText(formatCurrency(taxaDistribuicao), width - margin - 80, y, { size: 10 });
+      drawText(`${consumo} kWh`, colQty, y, { size: 10 });
+      drawText(`${formatCurrency(distributionFeePerKwh)}/kWh`, colUnit, y, { size: 9 });
+      drawText(formatCurrency(taxaDistribuicao), colVal, y, { size: 10 });
       y -= 5;
       drawLine(y, COLORS.lightGray);
       y -= 18;
@@ -192,10 +198,10 @@ export async function generateMemberInvoice({
       // Row: remaining taxes (CIP, iluminação pública, etc.)
       if (taxasGerais > 0) {
         drawText('Demais taxas Enel (est.)', margin, y, { size: 10 });
-        drawText('CIP, ilum. publica, etc.', 260, y, {
+        drawText('CIP, ilum. publica, etc.', colQty, y, {
           size: 8, color: COLORS.gray,
         });
-        drawText(formatCurrency(taxasGerais), width - margin - 80, y, { size: 10 });
+        drawText(formatCurrency(taxasGerais), colVal, y, { size: 10 });
         y -= 5;
         drawLine(y, COLORS.lightGray);
         y -= 18;
@@ -203,7 +209,7 @@ export async function generateMemberInvoice({
     } else {
       // Fallback: single line if no breakdown available
       drawText('Taxas da Enel', margin, y, { size: 10 });
-      drawText(formatCurrency(taxas), width - margin - 80, y, { size: 10 });
+      drawText(formatCurrency(taxas), colVal, y, { size: 10 });
       y -= 5;
       drawLine(y, COLORS.lightGray);
       y -= 18;
@@ -213,7 +219,7 @@ export async function generateMemberInvoice({
   // Total row
   drawRect(margin, y - 5, width - 2 * margin, 22, rgb(0.93, 0.95, 0.98));
   drawText('Total', margin + 5, y, { size: 10, bold: true });
-  drawText(formatCurrency(totalAPagar), width - margin - 80, y, {
+  drawText(formatCurrency(totalAPagar), colVal, y, {
     size: 10, bold: true,
   });
 
@@ -232,14 +238,14 @@ export async function generateMemberInvoice({
   drawText(`${consumo} kWh x ${formatCurrency(enelTariff - distFee)} + ${formatCurrency(taxas)}`, 250, y, {
     size: 8, color: COLORS.gray,
   });
-  drawText(formatCurrency(valorSemDesconto), width - margin - 80, y, { size: 10 });
+  drawText(formatCurrency(valorSemDesconto), colVal, y, { size: 10 });
   y -= 5;
   drawLine(y, COLORS.lightGray);
   y -= 18;
 
   // With solar
   drawText('Valor COM creditos solares', margin, y, { size: 10 });
-  drawText(formatCurrency(totalAPagar), width - margin - 80, y, { size: 10 });
+  drawText(formatCurrency(totalAPagar), colVal, y, { size: 10 });
   y -= 5;
   drawLine(y, COLORS.lightGray);
   y -= 25;

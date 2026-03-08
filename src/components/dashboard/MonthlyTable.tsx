@@ -133,13 +133,6 @@ export function MonthlyTable({
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
-              label="Trocas de Titularidade"
-              values={monthValues.map((v) => v.costs.trocaTitularidade)}
-              monthKeys={sortedMonthKeys}
-              fieldPath="costs.trocaTitularidade"
-              onCellEdit={onCellEdit}
-            />
-            <EditableDataRow
               label="Impostos"
               values={monthValues.map((v) => v.costs.impostos)}
               monthKeys={sortedMonthKeys}
@@ -178,6 +171,11 @@ export function MonthlyTable({
                 />
               </>
             )}
+            <ReadOnlyDataRow
+              label="Total Custos"
+              values={monthValues.map((v) => v.totalCosts)}
+              highlight
+            />
 
             {/* ── Créditos per member ── */}
             <SectionHeader label="Créditos" colSpan={colSpan} />
@@ -235,12 +233,18 @@ export function MonthlyTable({
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
-              label="Energia Gerada Não Consumida"
+              label="Energia Gerada"
               values={monthValues.map((v) => v.creditosCompensar)}
               monthKeys={sortedMonthKeys}
               fieldPath="creditosCompensar"
               format="kwh"
               onCellEdit={onCellEdit}
+            />
+            <ReadOnlyDataRow
+              label="Saldo após consumo"
+              values={monthValues.map((v) => v.energyRemainder)}
+              format="kwh"
+              isComputed
             />
 
             {/* ── Ganhos ── */}

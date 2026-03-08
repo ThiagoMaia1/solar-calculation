@@ -145,10 +145,17 @@ export function computeMonthValues(
 
   // Member results
   const memberResults: Record<string, MemberResult> = {};
+  let membersConsumption = 0;
   for (const m of members) {
     const credits = monthData.credits?.[m.id] ?? { consumo: 0, taxas: 0 };
     memberResults[m.id] = calculateMemberResults(credits, energyValue);
+    membersConsumption += credits.consumo ?? 0;
   }
+
+  const thiagoConsumo = monthData.thiagoConsumo ?? 0;
+  const creditosCompensar = monthData.creditosCompensar ?? 0;
+  const totalConsumption = membersConsumption + thiagoConsumo;
+  const energyRemainder = creditosCompensar - totalConsumption;
 
   // Gains
   const gains = calculateMonthGains(monthData, members, energyValue);
@@ -158,8 +165,8 @@ export function computeMonthValues(
     gains.resultadoParentes +
     gains.economiaPropria;
 
-  // Resultado mês
-  const resultadoMes = totalGains - totalCosts;
+  // Resultado mês = energy remainder × energy value - costs
+  const resultadoMes = energyRemainder * energyValue - totalCosts;
 
   // Para o balanço (cumulative credits × current energy value)
   const sortedKeys = Object.keys(data.months).sort();
@@ -178,8 +185,10 @@ export function computeMonthValues(
     costs,
     totalCosts,
     memberResults,
-    thiagoConsumo: monthData.thiagoConsumo ?? 0,
-    creditosCompensar: monthData.creditosCompensar ?? 0,
+    thiagoConsumo,
+    creditosCompensar,
+    totalConsumption,
+    energyRemainder,
     gains,
     totalGains,
     resultadoMes,

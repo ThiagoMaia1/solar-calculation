@@ -241,7 +241,7 @@ export default function MonthForm({
                 <legend className="text-sm font-semibold text-gray-700 px-2">Outros</legend>
                 <div className="grid grid-cols-2 gap-3">
                   <InputField name="thiagoConsumo" label="Thiago Consumo (kWh)" step="1" />
-                  <InputField name="creditosCompensar" label="Energia Gerada Não Consumida (kWh)" step="1" />
+                  <InputField name="creditosCompensar" label="Energia Gerada (kWh)" step="1" />
                   <InputField name="economyEnergy" label="Economy Energy (R$)" />
                 </div>
               </fieldset>

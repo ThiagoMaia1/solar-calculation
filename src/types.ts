@@ -106,6 +106,8 @@ export interface ComputedMonthValues {
   memberResults: Record<string, MemberResult>;
   thiagoConsumo: number;
   creditosCompensar: number;
+  totalConsumption: number;
+  energyRemainder: number;
   gains: MonthGains;
   totalGains: number;
   resultadoMes: number;
