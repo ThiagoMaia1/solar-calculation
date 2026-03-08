@@ -105,7 +105,7 @@ export default function PdfPreviewPanel({ preview }: PdfPreviewPanelProps) {
       ) : (
         <div className="flex items-center justify-center flex-1 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200 p-4">
           <p className="text-gray-400 text-sm">
-            Selecione um membro e mês, depois clique em "Gerar Fatura PDF"
+            Selecione um membro e mês para visualizar a fatura
           </p>
         </div>
       )}

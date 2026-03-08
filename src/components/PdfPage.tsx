@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAppData } from '../hooks/useAppData';
 import { generateMemberInvoice } from '../utils/pdfGenerator';
 import { buildPixPayload } from '../utils/pixQrCode';
@@ -29,6 +29,11 @@ export default function PdfPage() {
 
   const { members, months, settings } = data;
   const sortedMonths = Object.keys(months).sort();
+
+  const handleClear = useCallback(() => {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  }, [preview]);
 
   const handleGenerate = async (values: { memberId: string; monthKey: string }) => {
     try {
@@ -96,6 +101,7 @@ export default function PdfPage() {
             sortedMonths={sortedMonths}
             generating={generating}
             onGenerate={handleGenerate}
+            onClear={handleClear}
           />
         </div>
 
