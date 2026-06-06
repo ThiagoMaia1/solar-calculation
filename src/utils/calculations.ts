@@ -57,16 +57,17 @@ export function calculateMemberResults(
   energyValue: number,
 ): MemberResult {
   const consumo = memberCredits?.consumo ?? 0;
+  const consumoNaoCompensado = memberCredits?.consumoNaoCompensado ?? 0;
   const taxas = memberCredits?.taxas ?? 0;
 
   // Without taxes the calculation is incomplete — return zeros for computed fields
   if (taxas === 0) {
-    return { consumo, taxas: 0, resultado: 0, cobrar: 0 };
+    return { consumo, consumoNaoCompensado, taxas: 0, resultado: 0, cobrar: 0 };
   }
 
   const resultado = consumo * energyValue;
   const cobrar = resultado + taxas;
-  return { consumo, taxas, resultado, cobrar };
+  return { consumo, consumoNaoCompensado, taxas, resultado, cobrar };
 }
 
 /**

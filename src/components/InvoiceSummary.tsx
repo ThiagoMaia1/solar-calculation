@@ -22,8 +22,13 @@ export default function InvoiceSummary({ member, monthData, monthKey }: InvoiceS
         {member.name} — {formatMonthLabel(monthKey)}
       </p>
       <p className="text-gray-600">
-        Consumo: <span className="font-medium">{result.consumo} kWh</span>
+        Consumo compensado: <span className="font-medium">{result.consumo} kWh</span>
       </p>
+      {result.consumoNaoCompensado > 0 && (
+        <p className="text-gray-600">
+          Energia não compensada: <span className="font-medium">{result.consumoNaoCompensado} kWh</span>
+        </p>
+      )}
       {hasTaxas ? (
         <>
           <p className="text-gray-600">

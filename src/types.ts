@@ -33,6 +33,8 @@ export interface Member {
 export interface MemberCredits {
   consumo: number;
   taxas: number;
+  /** Energy beyond Enel's compensation limit — informational only, not used in billing calculations */
+  consumoNaoCompensado?: number;
 }
 
 export interface MonthlyCosts {
@@ -71,6 +73,7 @@ export interface DepreciationValues {
 
 export interface MemberResult {
   consumo: number;
+  consumoNaoCompensado: number;
   taxas: number;
   resultado: number;
   cobrar: number;

@@ -189,9 +189,18 @@ describe('calculateMemberResults', () => {
   it('returns zeros when credits are undefined', () => {
     const result = calculateMemberResults(undefined, 0.75);
     expect(result.consumo).toBe(0);
+    expect(result.consumoNaoCompensado).toBe(0);
     expect(result.taxas).toBe(0);
     expect(result.resultado).toBe(0);
     expect(result.cobrar).toBe(0);
+  });
+
+  it('passes through consumoNaoCompensado without affecting billing', () => {
+    const credits: MemberCredits = { consumo: 200, taxas: 10, consumoNaoCompensado: 50 };
+    const result = calculateMemberResults(credits, 0.75);
+    expect(result.consumoNaoCompensado).toBe(50);
+    expect(result.resultado).toBe(150);
+    expect(result.cobrar).toBe(160);
   });
 
   it('handles zero energy value', () => {

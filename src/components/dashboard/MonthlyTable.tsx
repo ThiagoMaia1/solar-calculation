@@ -188,10 +188,21 @@ export function MonthlyTable({
               />,
               <EditableDataRow
                 key={`${m.id}-consumo`}
-                label="Consumo"
+                label="Consumo compensado"
                 values={monthValues.map((v) => v.memberResults[m.id]?.consumo ?? 0)}
                 monthKeys={sortedMonthKeys}
                 fieldPath={`credits.${m.id}.consumo`}
+                format="kwh"
+                tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
+                indent
+                onCellEdit={onCellEdit}
+              />,
+              <EditableDataRow
+                key={`${m.id}-consumo-nao-compensado`}
+                label="Energia não compensada"
+                values={monthValues.map((v) => v.memberResults[m.id]?.consumoNaoCompensado ?? 0)}
+                monthKeys={sortedMonthKeys}
+                fieldPath={`credits.${m.id}.consumoNaoCompensado`}
                 format="kwh"
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
                 indent
@@ -225,7 +236,7 @@ export function MonthlyTable({
               />,
             ])}
             <EditableDataRow
-              label="Thiago Consumo"
+              label="Thiago consumo compensado"
               values={monthValues.map((v) => v.thiagoConsumo)}
               monthKeys={sortedMonthKeys}
               fieldPath="thiagoConsumo"

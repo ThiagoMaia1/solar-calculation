@@ -134,6 +134,7 @@ export default function MonthForm({
         {
           consumo: monthData?.credits?.[m.id]?.consumo ?? 0,
           taxas: monthData?.credits?.[m.id]?.taxas ?? 0,
+          consumoNaoCompensado: monthData?.credits?.[m.id]?.consumoNaoCompensado ?? 0,
         },
       ])
     ),
@@ -230,7 +231,8 @@ export default function MonthForm({
                   <div key={m.id} className="mb-3 last:mb-0">
                     <p className="text-xs font-bold text-gray-500 uppercase mb-1">{m.name}</p>
                     <div className="grid grid-cols-2 gap-3">
-                      <InputField name={`credits.${m.id}.consumo`} label="Consumo (kWh)" step="1" />
+                      <InputField name={`credits.${m.id}.consumo`} label="Consumo compensado (kWh)" step="1" />
+                      <InputField name={`credits.${m.id}.consumoNaoCompensado`} label="Energia não compensada (kWh)" step="1" />
                       <InputField name={`credits.${m.id}.taxas`} label="Taxas Enel (R$)" />
                     </div>
                   </div>
@@ -240,7 +242,7 @@ export default function MonthForm({
               <fieldset className="border border-gray-200 rounded-lg p-4">
                 <legend className="text-sm font-semibold text-gray-700 px-2">Outros</legend>
                 <div className="grid grid-cols-2 gap-3">
-                  <InputField name="thiagoConsumo" label="Thiago Consumo (kWh)" step="1" />
+                  <InputField name="thiagoConsumo" label="Thiago consumo compensado (kWh)" step="1" />
                   <InputField name="creditosCompensar" label="Energia Gerada (kWh)" step="1" />
                   <InputField name="economyEnergy" label="Economy Energy (R$)" />
                 </div>

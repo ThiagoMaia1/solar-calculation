@@ -64,6 +64,7 @@ export async function generateMemberInvoice({
   const energyValue = monthData.energyValue ?? 0;
   const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
   const consumo = credits.consumo ?? 0;
+  const consumoNaoCompensado = credits.consumoNaoCompensado ?? 0;
   const taxas = credits.taxas ?? 0;
   const valorCreditos = consumo * energyValue;
   const totalAPagar = valorCreditos + taxas;
@@ -182,6 +183,16 @@ export async function generateMemberInvoice({
   y -= 5;
   drawLine(y, COLORS.lightGray);
   y -= 18;
+
+  if (consumoNaoCompensado > 0) {
+    drawText('Energia nao compensada (alem do limite Enel)', margin, y, { size: 10, color: COLORS.gray });
+    drawText(`${consumoNaoCompensado} kWh`, colQty, y, { size: 10, color: COLORS.gray });
+    drawText('—', colUnit, y, { size: 9, color: COLORS.gray });
+    drawText('—', colVal, y, { size: 10, color: COLORS.gray });
+    y -= 5;
+    drawLine(y, COLORS.lightGray);
+    y -= 18;
+  }
 
   // Row: total Enel charges (parent row)
   if (taxas !== 0) {
@@ -331,10 +342,16 @@ export async function generateMemberInvoice({
   // ── Calculation details ──
   drawText('CALCULO', margin, y, { size: 9, bold: true, color: COLORS.gray });
   y -= 15;
-  drawText(`Consumo: ${consumo} kWh`, margin, y, {
+  drawText(`Consumo compensado: ${consumo} kWh`, margin, y, {
     size: 8, color: COLORS.gray,
   });
   y -= 12;
+  if (consumoNaoCompensado > 0) {
+    drawText(`Energia nao compensada: ${consumoNaoCompensado} kWh`, margin, y, {
+      size: 8, color: COLORS.gray,
+    });
+    y -= 12;
+  }
   drawText(`Valor por kWh (créditos solares): ${formatCurrency(energyValue)}`, margin, y, {
     size: 8, color: COLORS.gray,
   });
