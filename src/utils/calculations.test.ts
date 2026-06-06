@@ -428,9 +428,9 @@ describe('computeMonthValues', () => {
     // Gains
     expect(result!.totalGains).toBeCloseTo(50 + 75 + 280.5 + 225);
 
-    // resultadoMes = totalGains - totalCosts
+    // resultadoMes = energyRemainder × energyValue - totalCosts
     expect(result!.resultadoMes).toBeCloseTo(
-      result!.totalGains - result!.totalCosts,
+      result!.energyRemainder * result!.energyValue - result!.totalCosts,
     );
   });
 
@@ -443,16 +443,44 @@ describe('computeMonthValues', () => {
     });
 
     const result = computeMonthValues('2024-02', data);
-    // cumulative creditos: 100 + 50 = 150, × current energyValue 0.80
-    expect(result!.paraBalanco).toBeCloseTo(150 * 0.80);
+    // cumulative balance: (100-650) + (50-650) = -1150, × current energyValue 0.80
+    expect(result!.paraBalanco).toBeCloseTo(-1150 * 0.80);
   });
 
-  it('paraBalanco for the first month equals its own creditos × energyValue', () => {
+  it('paraBalanco for the first month equals generated minus consumed × energyValue', () => {
     const m1 = makeMonthData({ creditosCompensar: 80, energyValue: 0.60 });
     const data = makeAppData({ '2024-01': m1 });
 
     const result = computeMonthValues('2024-01', data);
-    expect(result!.paraBalanco).toBeCloseTo(80 * 0.60);
+    // generated 80, consumed 650 (200+150+300 thiago) → balance -570
+    expect(result!.paraBalanco).toBeCloseTo(-570 * 0.60);
+  });
+
+  it('paraBalanco decreases when consumption exceeds generation', () => {
+    const m1 = makeMonthData({
+      creditosCompensar: 1000,
+      thiagoConsumo: 0,
+      credits: {
+        pai: { consumo: 300, taxas: 10 },
+        mae: { consumo: 200, taxas: 8 },
+      },
+    });
+    const m2 = makeMonthData({
+      creditosCompensar: 0,
+      thiagoConsumo: 400,
+      credits: {
+        pai: { consumo: 300, taxas: 10 },
+        mae: { consumo: 200, taxas: 8 },
+      },
+    });
+    const data = makeAppData({
+      '2024-01': m1,
+      '2024-02': m2,
+    });
+
+    const result = computeMonthValues('2024-02', data);
+    // month 1: 1000-500=500, month 2: 0-900=-900 → cumulative -400
+    expect(result!.paraBalanco).toBeCloseTo(-400 * 0.75);
   });
 
   it('includes thiagoConsumo in output', () => {

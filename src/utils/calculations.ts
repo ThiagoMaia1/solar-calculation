@@ -169,14 +169,20 @@ export function computeMonthValues(
   // Resultado mês = energy remainder × energy value - costs
   const resultadoMes = energyRemainder * energyValue - totalCosts;
 
-  // Para o balanço (cumulative credits × current energy value)
+  // Para o balanço (cumulative energy balance × current energy value)
   const sortedKeys = Object.keys(data.months).sort();
   const currentIdx = sortedKeys.indexOf(monthKey);
-  let cumulativeCredits = 0;
+  let cumulativeBalance = 0;
   for (let i = 0; i <= currentIdx; i++) {
-    cumulativeCredits += data.months[sortedKeys[i]!]?.creditosCompensar ?? 0;
+    const md = data.months[sortedKeys[i]!];
+    const monthGenerated = md?.creditosCompensar ?? 0;
+    let monthConsumed = md?.thiagoConsumo ?? 0;
+    for (const m of members) {
+      monthConsumed += md?.credits?.[m.id]?.consumo ?? 0;
+    }
+    cumulativeBalance += monthGenerated - monthConsumed;
   }
-  const paraBalanco = cumulativeCredits * energyValue;
+  const paraBalanco = cumulativeBalance * energyValue;
 
   return {
     monthKey,
