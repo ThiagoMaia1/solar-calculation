@@ -16,14 +16,6 @@ export interface PixConfig {
   merchantCity: string;
 }
 
-export interface Settings {
-  enelTariff: number;
-  startDate: string; // "YYYY-MM"
-  pix?: PixConfig;
-  /** Non-compensated distribution fee per kWh charged by Enel on solar credit bills */
-  distributionFeePerKwh?: number;
-}
-
 export interface Member {
   id: string;
   name: string;
@@ -35,6 +27,8 @@ export interface MemberCredits {
   taxas: number;
   /** Energy beyond Enel's compensation limit — informational only, not used in billing calculations */
   consumoNaoCompensado?: number;
+  /** Enel billed this member as GD1 (lower TUSD) for this month */
+  gd1?: boolean;
 }
 
 export interface MonthlyCosts {
@@ -48,8 +42,30 @@ export interface MonthlyCosts {
   taxasEconomy: number;
 }
 
+/** Default editable cost values per calendar month (01–12) for new month entry */
+export type MonthCostDefaults = Pick<
+  MonthlyCosts,
+  'internet' | 'seguro' | 'iluminacaoPublica' | 'vigilante' | 'limpeza' | 'impostos'
+>;
+
+export interface Settings {
+  startDate: string; // "YYYY-MM"
+  pix?: PixConfig;
+  /** Non-compensated distribution fee per kWh charged by Enel on solar credit bills (GD2) */
+  distributionFeePerKwh?: number;
+  /** Distribution fee per kWh when Enel bills the member as GD1 */
+  gd1DistributionFeePerKwh?: number;
+  /** Default cost values keyed by calendar month (01–12) */
+  costDefaults?: Record<string, MonthCostDefaults>;
+}
+
 export interface MonthData {
-  energyValue: number;
+  /** Discount from monthly Enel base tariff per kWh — primary pricing input */
+  discountPerKwh?: number;
+  /** Enel all-in rate per kWh for this billing month (TE + TUSD + taxes) */
+  enelBaseCostPerKwh?: number;
+  /** @deprecated Legacy profit margin; migrated to discountPerKwh on read */
+  energyValue?: number;
   costs: MonthlyCosts;
   credits: Record<string, MemberCredits>;
   thiagoConsumo: number;
@@ -75,7 +91,13 @@ export interface MemberResult {
   consumo: number;
   consumoNaoCompensado: number;
   taxas: number;
+  /** Enel fees excluding energy and distribution — informational breakdown of taxas */
+  taxasGerais: number;
+  /** Margin on compensated energy: consumo × profitPerKwh */
   resultado: number;
+  chargedRatePerKwh: number;
+  /** Internal margin per kWh after distribution — not shown on customer PDF */
+  profitPerKwh: number;
   cobrar: number;
 }
 
@@ -102,7 +124,10 @@ export interface MonthGains {
 export interface ComputedMonthValues {
   monthKey: string;
   monthIdx: number;
-  energyValue: number;
+  discountPerKwh: number;
+  enelBaseCostPerKwh: number;
+  chargedRatePerKwh: number;
+  profitPerKwh: number;
   equipDep: DepreciationValues;
   costs: ComputedCosts;
   totalCosts: number;

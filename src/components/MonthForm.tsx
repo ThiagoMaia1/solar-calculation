@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { Formik, Form, Field, ErrorMessage } from 'formik';
+import { useState, useEffect, useRef } from 'react';
+import { Formik, Form, Field, ErrorMessage, useFormikContext } from 'formik';
 import * as Yup from 'yup';
-import type { Member, MonthData } from '../types';
+import type { Member, MonthData, Settings } from '../types';
+import { resolveMonthPricing } from '../utils/calculations';
+import { getDefaultCostsForMonthKey } from '../utils/costDefaults';
 
 const num = Yup.number().min(0, 'Min 0').required('Obrigatório');
 
@@ -89,11 +91,30 @@ function MonthSelector() {
   );
 }
 
+function CostDefaultsSync({ isNew, settings }: { isNew: boolean; settings: Settings }) {
+  const { values, setFieldValue } = useFormikContext<{ monthKey: string }>();
+  const prevMonthKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isNew) return;
+    if (prevMonthKey.current === values.monthKey) return;
+    prevMonthKey.current = values.monthKey;
+
+    const defaults = getDefaultCostsForMonthKey(values.monthKey, settings);
+    for (const [field, value] of Object.entries(defaults)) {
+      setFieldValue(`costs.${field}`, value);
+    }
+  }, [isNew, settings, setFieldValue, values.monthKey]);
+
+  return null;
+}
+
 interface MonthFormProps {
   isNew: boolean;
   monthKey: string;
   monthData: MonthData | null | undefined;
   members: Member[];
+  settings: Settings;
   onSave: (monthKey: string, data: MonthData) => void;
   onClose: () => void;
   saving: boolean;
@@ -104,6 +125,7 @@ export default function MonthForm({
   monthKey,
   monthData,
   members,
+  settings,
   onSave,
   onClose,
   saving,
@@ -115,17 +137,28 @@ export default function MonthForm({
   const now = new Date();
   const defaultMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
+  const resolvedPricing = monthData
+    ? resolveMonthPricing(monthData, settings)
+    : null;
+
+  const defaultCosts = getDefaultCostsForMonthKey(
+    monthKey || defaultMonthKey,
+    settings,
+  );
+
   const initialValues = {
     monthKey: monthKey || (isNew ? defaultMonthKey : ''),
-    energyValue: monthData?.energyValue ?? 0.48,
+    discountPerKwh: resolvedPricing?.discountPerKwh ?? 0.22,
+    enelBaseCostPerKwh: monthData?.enelBaseCostPerKwh ?? 0,
     costs: {
-      internet: monthData?.costs?.internet ?? 0,
-      seguro: monthData?.costs?.seguro ?? 0,
-      iluminacaoPublica: monthData?.costs?.iluminacaoPublica ?? 0,
-      vigilante: monthData?.costs?.vigilante ?? 0,
-      limpeza: monthData?.costs?.limpeza ?? 0,
+      internet: monthData?.costs?.internet ?? (isNew ? defaultCosts.internet : 0),
+      seguro: monthData?.costs?.seguro ?? (isNew ? defaultCosts.seguro : 0),
+      iluminacaoPublica:
+        monthData?.costs?.iluminacaoPublica ?? (isNew ? defaultCosts.iluminacaoPublica : 0),
+      vigilante: monthData?.costs?.vigilante ?? (isNew ? defaultCosts.vigilante : 0),
+      limpeza: monthData?.costs?.limpeza ?? (isNew ? defaultCosts.limpeza : 0),
       trocaTitularidade: monthData?.costs?.trocaTitularidade ?? 0,
-      impostos: monthData?.costs?.impostos ?? 0,
+      impostos: monthData?.costs?.impostos ?? (isNew ? defaultCosts.impostos : 0),
       taxasEconomy: monthData?.costs?.taxasEconomy ?? 0,
     },
     credits: Object.fromEntries(
@@ -135,6 +168,7 @@ export default function MonthForm({
           consumo: monthData?.credits?.[m.id]?.consumo ?? 0,
           taxas: monthData?.credits?.[m.id]?.taxas ?? 0,
           consumoNaoCompensado: monthData?.credits?.[m.id]?.consumoNaoCompensado ?? 0,
+          gd1: monthData?.credits?.[m.id]?.gd1 ?? false,
         },
       ])
     ),
@@ -149,7 +183,8 @@ export default function MonthForm({
           .required('Obrigatório')
           .matches(/^\d{4}-\d{2}$/, 'Formato: AAAA-MM')
       : Yup.string(),
-    energyValue: Yup.number().min(0).required('Obrigatório'),
+    discountPerKwh: Yup.number().min(0).required('Obrigatório'),
+    enelBaseCostPerKwh: Yup.number().min(0).required('Obrigatório'),
     costs: Yup.object({
       internet: num,
       seguro: num,
@@ -168,6 +203,9 @@ export default function MonthForm({
   const handleSubmit = (values: typeof initialValues) => {
     const { monthKey: mk, ...monthPayload } = values;
     const clean = deepParseNumbers(monthPayload) as MonthData;
+    if (monthData?.energyValue != null) {
+      clean.energyValue = monthData.energyValue;
+    }
     onSave(isNew ? mk : monthKey, clean);
   };
 
@@ -175,9 +213,14 @@ export default function MonthForm({
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-10 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 mb-10">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-800">
-            {isNew ? 'Adicionar Mês' : `Editar ${monthKey}`}
-          </h2>
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">
+              {isNew ? 'Adicionar Mês' : `Editar ${monthKey}`}
+            </h2>
+            <h3>
+              (Contas com vencimento em 10 de {monthKey.split('-')[1]} de {monthKey.split('-')[0]})
+            </h3>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 text-xl leading-none"
@@ -193,9 +236,19 @@ export default function MonthForm({
         >
           {() => (
             <Form className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
+              <CostDefaultsSync isNew={isNew} settings={settings} />
               {isNew && <MonthSelector />}
 
-              <InputField name="energyValue" label="Valor líquido da energia (R$/kWh)" step="0.01" />
+              <InputField
+                name="enelBaseCostPerKwh"
+                label="Tarifa base Enel do mês (R$/kWh)"
+                step="0.01"
+              />
+              <InputField
+                name="discountPerKwh"
+                label="Desconto sobre tarifa base Enel (R$/kWh)"
+                step="0.01"
+              />
 
               <fieldset className="border border-gray-200 rounded-lg p-4">
                 <legend className="text-sm font-semibold text-gray-700 px-2">Custos</legend>
@@ -235,6 +288,22 @@ export default function MonthForm({
                       <InputField name={`credits.${m.id}.consumoNaoCompensado`} label="Energia não compensada (kWh)" step="1" />
                       <InputField name={`credits.${m.id}.taxas`} label="Taxas Enel (R$)" />
                     </div>
+                    <Field name={`credits.${m.id}.gd1`}>
+                      {({ field, form }: {
+                        field: { name: string; value: boolean };
+                        form: { setFieldValue: (name: string, value: boolean) => void };
+                      }) => (
+                        <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={field.value === true}
+                            onChange={(e) => form.setFieldValue(field.name, e.target.checked)}
+                            className="rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                          />
+                          Fatura Enel GD1 (TUSD reduzida)
+                        </label>
+                      )}
+                    </Field>
                   </div>
                 ))}
               </fieldset>
@@ -242,7 +311,6 @@ export default function MonthForm({
               <fieldset className="border border-gray-200 rounded-lg p-4">
                 <legend className="text-sm font-semibold text-gray-700 px-2">Outros</legend>
                 <div className="grid grid-cols-2 gap-3">
-                  <InputField name="thiagoConsumo" label="Thiago consumo compensado (kWh)" step="1" />
                   <InputField name="creditosCompensar" label="Energia Gerada (kWh)" step="1" />
                   <InputField name="economyEnergy" label="Economy Energy (R$)" />
                 </div>
@@ -276,6 +344,7 @@ export default function MonthForm({
  * Recursively parse all string number values to actual numbers.
  */
 function deepParseNumbers(obj: unknown): unknown {
+  if (typeof obj === 'boolean') return obj;
   if (typeof obj !== 'object' || obj === null) {
     const n = Number(obj);
     return isNaN(n) ? obj : n;

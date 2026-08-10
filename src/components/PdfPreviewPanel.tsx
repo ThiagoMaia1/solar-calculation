@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { copyTextToClipboard } from '../utils/invoiceGeneration';
 import { formatMonthLabel } from '../utils/calculations';
 import type { PdfPreview } from '../types';
 
@@ -47,14 +48,9 @@ export default function PdfPreviewPanel({ preview }: PdfPreviewPanelProps) {
 
   const handleCopyPix = async () => {
     if (!preview?.pixPayload) return;
-    try {
-      await navigator.clipboard.writeText(preview.pixPayload);
-      setCopyState('copied');
-      setTimeout(() => setCopyState('idle'), 2000);
-    } catch {
-      setCopyState('error');
-      setTimeout(() => setCopyState('idle'), 2000);
-    }
+    const copied = await copyTextToClipboard(preview.pixPayload);
+    setCopyState(copied ? 'copied' : 'error');
+    setTimeout(() => setCopyState('idle'), 2000);
   };
 
   return (

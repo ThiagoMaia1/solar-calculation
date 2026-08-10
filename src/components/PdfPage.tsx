@@ -1,7 +1,11 @@
 import { useCallback, useState } from 'react';
 import { useAppData } from '../hooks/useAppData';
-import { generateMemberInvoice } from '../utils/pdfGenerator';
-import { buildPixPayload } from '../utils/pixQrCode';
+import {
+  copyTextToClipboard,
+  formatBulkPixClipboardText,
+  generateMemberInvoiceData,
+  generateMemberPixData,
+} from '../utils/invoiceGeneration';
 import InvoiceForm from './InvoiceForm';
 import PdfPreviewPanel from './PdfPreviewPanel';
 import type { PdfPreview } from '../types';
@@ -9,7 +13,93 @@ import type { PdfPreview } from '../types';
 export default function PdfPage() {
   const { data, isLoading } = useAppData();
   const [generating, setGenerating] = useState(false);
+  const [bulkGenerating, setBulkGenerating] = useState(false);
+  const [bulkPixText, setBulkPixText] = useState<string | null>(null);
   const [preview, setPreview] = useState<PdfPreview | null>(null);
+
+  const handleClear = useCallback(() => {
+    setPreview((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }, []);
+
+  const handleGenerate = useCallback(async (values: { memberId: string; monthKey: string }) => {
+    if (!data) return;
+
+    const { members, months, settings } = data;
+
+    try {
+      setGenerating(true);
+      const member = members.find((m) => m.id === values.memberId);
+      const monthData = months[values.monthKey];
+
+      if (!member || !monthData) {
+        alert('Membro ou mês não encontrado.');
+        return;
+      }
+
+      const invoice = await generateMemberInvoiceData(member, monthData, values.monthKey, settings);
+      const blob = new Blob([invoice.pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      setPreview((current) => {
+        if (current) URL.revokeObjectURL(current.url);
+        return {
+          url,
+          filename: invoice.filename,
+          member: member.name,
+          monthKey: values.monthKey,
+          pixPayload: invoice.pixPayload,
+        };
+      });
+    } catch (err) {
+      alert('Erro ao gerar PDF: ' + (err instanceof Error ? err.message : 'Unknown'));
+    } finally {
+      setGenerating(false);
+    }
+  }, [data]);
+
+  const handleBulkCopyPix = useCallback(async (monthKey: string) => {
+    if (!data) return;
+
+    const { members, months, settings } = data;
+    const monthData = months[monthKey];
+    if (!monthData) {
+      alert('Mês não encontrado.');
+      return;
+    }
+
+    const membersWithTaxas = members.filter(
+      (m) => (monthData.credits?.[m.id]?.taxas ?? 0) !== 0,
+    );
+
+    if (membersWithTaxas.length === 0) {
+      alert('Nenhum membro com taxas Enel cadastradas neste mês.');
+      return;
+    }
+
+    try {
+      setBulkGenerating(true);
+      const results = membersWithTaxas.map((member) =>
+        generateMemberPixData(member, monthData, settings),
+      );
+
+      const clipboardText = formatBulkPixClipboardText(results);
+      const copied = await copyTextToClipboard(clipboardText);
+      setBulkPixText(clipboardText);
+
+      if (copied) {
+        alert(`Códigos PIX de ${results.length} membros copiados.`);
+      } else {
+        alert('Use o botão "Copiar PIX" abaixo.');
+      }
+    } catch (err) {
+      alert('Erro ao copiar PIX: ' + (err instanceof Error ? err.message : 'Unknown'));
+    } finally {
+      setBulkGenerating(false);
+    }
+  }, [data]);
 
   if (isLoading) {
     return (
@@ -30,65 +120,6 @@ export default function PdfPage() {
   const { members, months, settings } = data;
   const sortedMonths = Object.keys(months).sort();
 
-  const handleClear = useCallback(() => {
-    if (preview) URL.revokeObjectURL(preview.url);
-    setPreview(null);
-  }, [preview]);
-
-  const handleGenerate = async (values: { memberId: string; monthKey: string }) => {
-    try {
-      setGenerating(true);
-      const member = members.find((m) => m.id === values.memberId);
-      const monthData = months[values.monthKey];
-
-      if (!member || !monthData) {
-        alert('Membro ou mês não encontrado.');
-        return;
-      }
-
-      const pdfBytes = await generateMemberInvoice({
-        member,
-        monthData,
-        monthKey: values.monthKey,
-        enelTariff: settings.enelTariff,
-        pix: settings.pix,
-        distributionFeePerKwh: settings.distributionFeePerKwh ?? (settings as unknown as Record<string, unknown>).estimatedTaxPerKwh as number | undefined,
-      });
-
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-
-      // Build PIX copia-e-cola payload if pix is configured
-      let pixPayload: string | undefined;
-      if (settings.pix) {
-        const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
-        const energyValue = monthData.energyValue ?? 0;
-        const totalAPagar = credits.consumo * energyValue + credits.taxas;
-        if (totalAPagar > 0) {
-          pixPayload = buildPixPayload({
-            pixKey: settings.pix.key,
-            merchantName: settings.pix.merchantName,
-            merchantCity: settings.pix.merchantCity,
-            amount: totalAPagar,
-          });
-        }
-      }
-
-      if (preview) URL.revokeObjectURL(preview.url);
-      setPreview({
-        url,
-        filename: `fatura-${member.name.toLowerCase()}-${values.monthKey}.pdf`,
-        member: member.name,
-        monthKey: values.monthKey,
-        pixPayload,
-      });
-    } catch (err) {
-      alert('Erro ao gerar PDF: ' + (err instanceof Error ? err.message : 'Unknown'));
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <h1 className="text-2xl font-bold text-gray-800 mb-4">Gerar Fatura de Créditos Solares</h1>
@@ -99,8 +130,12 @@ export default function PdfPage() {
             members={members}
             months={months}
             sortedMonths={sortedMonths}
+            settings={settings}
             generating={generating}
+            bulkGenerating={bulkGenerating}
+            bulkPixText={bulkPixText}
             onGenerate={handleGenerate}
+            onBulkCopyPix={handleBulkCopyPix}
             onClear={handleClear}
           />
         </div>

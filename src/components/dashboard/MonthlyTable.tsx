@@ -4,6 +4,8 @@ import { SectionHeader, MemberSubHeader } from './SectionHeaders';
 import { ReadOnlyDataRow, EditableDataRow } from './DataRows';
 import type { ComputedMonthValues, Member } from '../../types';
 
+const RECENT_MONTHS_COUNT = 6;
+
 interface MonthlyTableProps {
   sortedMonthKeys: string[];
   monthValues: ComputedMonthValues[];
@@ -18,7 +20,6 @@ export function MonthlyTable({
   sortedMonthKeys,
   monthValues,
   members,
-  colSpan,
   onEditMonth,
   onDeleteMonth,
   onCellEdit,
@@ -27,6 +28,19 @@ export function MonthlyTable({
     (v) => v.costs.trocaTitularidade !== 0 || v.costs.taxasEconomy !== 0,
   );
   const [showOtherExpenses, setShowOtherExpenses] = useState(hasOtherExpenses);
+  const [showAllMonths, setShowAllMonths] = useState(false);
+
+  const canCollapseMonths = sortedMonthKeys.length > RECENT_MONTHS_COUNT;
+  const visibleMonthKeys =
+    showAllMonths || !canCollapseMonths
+      ? sortedMonthKeys
+      : sortedMonthKeys.slice(-RECENT_MONTHS_COUNT);
+  const visibleMonthValues =
+    showAllMonths || !canCollapseMonths
+      ? monthValues
+      : monthValues.slice(-RECENT_MONTHS_COUNT);
+  const visibleColSpan = visibleMonthKeys.length + 1;
+  const hiddenMonthCount = sortedMonthKeys.length - RECENT_MONTHS_COUNT;
 
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden h-full flex flex-col">
@@ -35,9 +49,19 @@ export function MonthlyTable({
           <thead className="sticky top-0 z-30">
             <tr className="bg-gray-800 text-white">
               <th className="sticky left-0 z-40 bg-gray-800 px-3 py-3 text-left text-xs font-medium uppercase tracking-wider min-w-[200px]">
-                &nbsp;
+                {canCollapseMonths && (
+                  <button
+                    onClick={() => setShowAllMonths((v) => !v)}
+                    className="text-amber-300 hover:text-amber-200 font-medium normal-case tracking-normal flex items-center gap-1"
+                  >
+                    <span className={`transition-transform inline-block ${showAllMonths ? 'rotate-90' : ''}`}>▶</span>
+                    {showAllMonths
+                      ? 'Ocultar meses anteriores'
+                      : `Mostrar ${hiddenMonthCount} ${hiddenMonthCount === 1 ? 'mês anterior' : 'meses anteriores'}`}
+                  </button>
+                )}
               </th>
-              {sortedMonthKeys.map((mk) => (
+              {visibleMonthKeys.map((mk) => (
                 <th
                   key={mk}
                   className="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider min-w-[130px]"
@@ -65,83 +89,106 @@ export function MonthlyTable({
           </thead>
           <tbody>
             {/* ── Valores ── */}
-            <SectionHeader label="Valores" colSpan={colSpan} />
+            <SectionHeader label="Valores" colSpan={visibleColSpan} />
             <ReadOnlyDataRow
               label="Inversor c/ Depreciação"
-              values={monthValues.map((v) => v.equipDep.inversor)}
+              values={visibleMonthValues.map((v) => v.equipDep.inversor)}
               isComputed
             />
             <ReadOnlyDataRow
               label="Placas c/ Depreciação"
-              values={monthValues.map((v) => v.equipDep.placas)}
+              values={visibleMonthValues.map((v) => v.equipDep.placas)}
               isComputed
             />
             <EditableDataRow
-              label="Valor líquido da energia"
-              values={monthValues.map((v) => v.energyValue)}
-              monthKeys={sortedMonthKeys}
-              fieldPath="energyValue"
+              label="Tarifa base Enel"
+              values={visibleMonthValues.map((v) => v.enelBaseCostPerKwh)}
+              monthKeys={visibleMonthKeys}
+              fieldPath="enelBaseCostPerKwh"
+              format="currency4"
+              tooltip="Tarifa Enel all-in do mês (TE + TUSD + impostos)"
+              onCellEdit={onCellEdit}
+            />
+            <EditableDataRow
+              label="Desconto sobre tarifa base"
+              values={visibleMonthValues.map((v) => v.discountPerKwh)}
+              monthKeys={visibleMonthKeys}
+              fieldPath="discountPerKwh"
               format="currency4"
               onCellEdit={onCellEdit}
             />
+            <ReadOnlyDataRow
+              label="Valor kwh (Distribuição + produção)"
+              values={visibleMonthValues.map((v) => v.chargedRatePerKwh)}
+              format="currency4"
+              isComputed
+              tooltip="Tarifa all-in incluindo distribuicao (Enel - desconto)"
+            />
+            <ReadOnlyDataRow
+              label="Margem interna"
+              values={visibleMonthValues.map((v) => v.profitPerKwh)}
+              format="currency4"
+              isComputed
+              tooltip="Margem apos distribuicao — nao aparece na fatura"
+            />
 
             {/* ── Custos ── */}
-            <SectionHeader label="Custos" colSpan={colSpan} />
+            <SectionHeader label="Custos" colSpan={visibleColSpan} />
             <ReadOnlyDataRow
               label="Depreciação Inversor"
-              values={monthValues.map((v) => v.costs.depreciacaoInversor)}
+              values={visibleMonthValues.map((v) => v.costs.depreciacaoInversor)}
               isComputed
             />
             <ReadOnlyDataRow
               label="Depreciação Placas"
-              values={monthValues.map((v) => v.costs.depreciacaoPlacas)}
+              values={visibleMonthValues.map((v) => v.costs.depreciacaoPlacas)}
               isComputed
             />
             <EditableDataRow
               label="Internet"
-              values={monthValues.map((v) => v.costs.internet)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.internet)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.internet"
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
               label="Seguro"
-              values={monthValues.map((v) => v.costs.seguro)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.seguro)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.seguro"
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
               label="Iluminação Pública"
-              values={monthValues.map((v) => v.costs.iluminacaoPublica)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.iluminacaoPublica)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.iluminacaoPublica"
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
               label="Vigilante"
-              values={monthValues.map((v) => v.costs.vigilante)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.vigilante)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.vigilante"
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
               label="Limpeza/Manutenção"
-              values={monthValues.map((v) => v.costs.limpeza)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.limpeza)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.limpeza"
               onCellEdit={onCellEdit}
             />
             <EditableDataRow
               label="Impostos"
-              values={monthValues.map((v) => v.costs.impostos)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.costs.impostos)}
+              monthKeys={visibleMonthKeys}
               fieldPath="costs.impostos"
               onCellEdit={onCellEdit}
             />
             <tr>
               <td
-                colSpan={colSpan}
+                colSpan={visibleColSpan}
                 className="sticky left-0 z-10 bg-gray-50 px-3 py-1.5 border-b border-gray-200"
               >
                 <button
@@ -157,15 +204,15 @@ export function MonthlyTable({
               <>
                 <EditableDataRow
                   label="Trocas de Titularidade"
-                  values={monthValues.map((v) => v.costs.trocaTitularidade)}
-                  monthKeys={sortedMonthKeys}
+                  values={visibleMonthValues.map((v) => v.costs.trocaTitularidade)}
+                  monthKeys={visibleMonthKeys}
                   fieldPath="costs.trocaTitularidade"
                   onCellEdit={onCellEdit}
                 />
                 <EditableDataRow
                   label="Taxas Economy Energy"
-                  values={monthValues.map((v) => v.costs.taxasEconomy)}
-                  monthKeys={sortedMonthKeys}
+                  values={visibleMonthValues.map((v) => v.costs.taxasEconomy)}
+                  monthKeys={visibleMonthKeys}
                   fieldPath="costs.taxasEconomy"
                   onCellEdit={onCellEdit}
                 />
@@ -173,24 +220,24 @@ export function MonthlyTable({
             )}
             <ReadOnlyDataRow
               label="Total Custos"
-              values={monthValues.map((v) => v.totalCosts)}
+              values={visibleMonthValues.map((v) => v.totalCosts)}
               highlight
             />
 
             {/* ── Créditos per member ── */}
-            <SectionHeader label="Créditos" colSpan={colSpan} />
+            <SectionHeader label="Créditos" colSpan={visibleColSpan} />
             {members.map((m) => [
               <MemberSubHeader
                 key={`${m.id}-header`}
                 name={m.name}
                 address={m.address}
-                colSpan={colSpan}
+                colSpan={visibleColSpan}
               />,
               <EditableDataRow
                 key={`${m.id}-consumo`}
                 label="Consumo compensado"
-                values={monthValues.map((v) => v.memberResults[m.id]?.consumo ?? 0)}
-                monthKeys={sortedMonthKeys}
+                values={visibleMonthValues.map((v) => v.memberResults[m.id]?.consumo ?? 0)}
+                monthKeys={visibleMonthKeys}
                 fieldPath={`credits.${m.id}.consumo`}
                 format="kwh"
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
@@ -200,8 +247,8 @@ export function MonthlyTable({
               <EditableDataRow
                 key={`${m.id}-consumo-nao-compensado`}
                 label="Energia não compensada"
-                values={monthValues.map((v) => v.memberResults[m.id]?.consumoNaoCompensado ?? 0)}
-                monthKeys={sortedMonthKeys}
+                values={visibleMonthValues.map((v) => v.memberResults[m.id]?.consumoNaoCompensado ?? 0)}
+                monthKeys={visibleMonthKeys}
                 fieldPath={`credits.${m.id}.consumoNaoCompensado`}
                 format="kwh"
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
@@ -211,8 +258,8 @@ export function MonthlyTable({
               <EditableDataRow
                 key={`${m.id}-taxas`}
                 label="Taxas"
-                values={monthValues.map((v) => v.memberResults[m.id]?.taxas ?? 0)}
-                monthKeys={sortedMonthKeys}
+                values={visibleMonthValues.map((v) => v.memberResults[m.id]?.taxas ?? 0)}
+                monthKeys={visibleMonthKeys}
                 fieldPath={`credits.${m.id}.taxas`}
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
                 indent
@@ -221,7 +268,7 @@ export function MonthlyTable({
               <ReadOnlyDataRow
                 key={`${m.id}-cobrar`}
                 label="Cobrar"
-                values={monthValues.map((v) => v.memberResults[m.id]?.cobrar ?? 0)}
+                values={visibleMonthValues.map((v) => v.memberResults[m.id]?.cobrar ?? 0)}
                 isComputed
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
                 indent
@@ -229,64 +276,51 @@ export function MonthlyTable({
               <ReadOnlyDataRow
                 key={`${m.id}-resultado`}
                 label="Resultado"
-                values={monthValues.map((v) => v.memberResults[m.id]?.resultado ?? 0)}
+                values={visibleMonthValues.map((v) => v.memberResults[m.id]?.resultado ?? 0)}
                 isComputed
                 tooltip={m.address ? `${m.name} — ${m.address}` : m.name}
                 indent
               />,
             ])}
             <EditableDataRow
-              label="Thiago consumo compensado"
-              values={monthValues.map((v) => v.thiagoConsumo)}
-              monthKeys={sortedMonthKeys}
-              fieldPath="thiagoConsumo"
-              format="kwh"
-              onCellEdit={onCellEdit}
-            />
-            <EditableDataRow
               label="Energia Gerada"
-              values={monthValues.map((v) => v.creditosCompensar)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.creditosCompensar)}
+              monthKeys={visibleMonthKeys}
               fieldPath="creditosCompensar"
               format="kwh"
               onCellEdit={onCellEdit}
             />
             <ReadOnlyDataRow
               label="Saldo após consumo"
-              values={monthValues.map((v) => v.energyRemainder)}
+              values={visibleMonthValues.map((v) => v.energyRemainder)}
               format="kwh"
               isComputed
             />
 
             {/* ── Ganhos ── */}
-            <SectionHeader label="Ganhos" colSpan={colSpan} />
+            <SectionHeader label="Ganhos" colSpan={visibleColSpan} />
             <EditableDataRow
               label="Economy Energy"
-              values={monthValues.map((v) => v.gains.economyEnergy)}
-              monthKeys={sortedMonthKeys}
+              values={visibleMonthValues.map((v) => v.gains.economyEnergy)}
+              monthKeys={visibleMonthKeys}
               fieldPath="economyEnergy"
               onCellEdit={onCellEdit}
             />
             <ReadOnlyDataRow
               label="Ganho em créditos"
-              values={monthValues.map((v) => v.gains.ganhoCreditos)}
+              values={visibleMonthValues.map((v) => v.gains.ganhoCreditos)}
               isComputed
             />
             <ReadOnlyDataRow
               label="Resultado parentes"
-              values={monthValues.map((v) => v.gains.resultadoParentes)}
-              isComputed
-            />
-            <ReadOnlyDataRow
-              label="Economia própria"
-              values={monthValues.map((v) => v.gains.economiaPropria)}
+              values={visibleMonthValues.map((v) => v.gains.resultadoParentes)}
               isComputed
             />
 
             {/* ── Resultado ── */}
-            <SectionHeader label="Resultado" colSpan={colSpan} />
-            <ReadOnlyDataRow label="Resultado Mês" values={monthValues.map((v) => v.resultadoMes)} highlight />
-            <ReadOnlyDataRow label="Para o balanço" values={monthValues.map((v) => v.paraBalanco)} highlight />
+            <SectionHeader label="Resultado" colSpan={visibleColSpan} />
+            <ReadOnlyDataRow label="Resultado Mês" values={visibleMonthValues.map((v) => v.resultadoMes)} highlight />
+            <ReadOnlyDataRow label="Para o balanço" values={visibleMonthValues.map((v) => v.paraBalanco)} highlight />
           </tbody>
         </table>
       </div>

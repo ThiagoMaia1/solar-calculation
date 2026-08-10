@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, type Color } from 'pdf-lib';
-import type { Member, MonthData, PixConfig } from '../types';
+import type { Member, MonthData, PixConfig, Settings } from '../types';
+import { calculateMemberResults, getEnelBillBreakdown, resolveEnelBaseCostPerKwh, resolveMonthPricing } from './calculations';
 import { generatePixQrCodePng } from './pixQrCode';
 
 const COLORS = {
@@ -10,6 +11,7 @@ const COLORS = {
   lightGray: rgb(0.85, 0.85, 0.85),
   white: rgb(1, 1, 1),
   green: rgb(0.1, 0.55, 0.25),
+  red: rgb(0.75, 0.15, 0.15),
 } as const;
 
 function formatCurrency(value: number): string {
@@ -35,11 +37,10 @@ interface InvoiceParams {
   member: Member;
   monthData: MonthData;
   monthKey: string;
-  enelTariff: number;
   ownerName?: string;
   pix?: PixConfig;
-  /** Non-compensated distribution fee per kWh charged by Enel on solar credit bills */
   distributionFeePerKwh?: number;
+  gd1DistributionFeePerKwh?: number;
 }
 
 /**
@@ -49,10 +50,10 @@ export async function generateMemberInvoice({
   member,
   monthData,
   monthKey,
-  enelTariff,
   ownerName = 'Thiago Pereira Maia',
   pix,
   distributionFeePerKwh,
+  gd1DistributionFeePerKwh,
 }: InvoiceParams): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
@@ -61,24 +62,56 @@ export async function generateMemberInvoice({
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const energyValue = monthData.energyValue ?? 0;
-  const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
-  const consumo = credits.consumo ?? 0;
-  const consumoNaoCompensado = credits.consumoNaoCompensado ?? 0;
-  const taxas = credits.taxas ?? 0;
-  const valorCreditos = consumo * energyValue;
-  const totalAPagar = valorCreditos + taxas;
+  const settings: Pick<Settings, 'distributionFeePerKwh'> = {
+    distributionFeePerKwh,
+  };
 
-  const distFee = distributionFeePerKwh ?? 0;
-  const taxaDistribuicao = Math.min(consumo * distFee, taxas);
-  const taxasGerais = taxas - taxaDistribuicao;
-  const valorSemDesconto = taxas + consumo * (enelTariff - distFee);
+  const pricing = resolveMonthPricing(monthData, settings);
+  const enelBaseCostPerKwh = resolveEnelBaseCostPerKwh(monthData);
+  const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
+
+  const billing = {
+    distributionFeePerKwh,
+    gd1DistributionFeePerKwh,
+    enelBaseCostPerKwh,
+  };
+
+  const result = calculateMemberResults(credits, pricing, billing);
+  const enelBill = getEnelBillBreakdown(credits, billing);
+
+  const consumo = result.consumo;
+  const consumoNaoCompensado = result.consumoNaoCompensado;
+  const taxasEnel = result.taxas;
+  const taxasGerais = result.taxasGerais;
+  const totalAPagar = result.cobrar;
+  const chargedRatePerKwh = result.chargedRatePerKwh;
+  const valorCreditos = consumo * chargedRatePerKwh;
+  const enelPartCreditos = enelBill.tusdCompensada;
+  const isGd1 = credits.gd1 === true;
+
+  const consumoTotal = consumo + consumoNaoCompensado;
+  const valorSemDesconto =
+    consumoTotal * enelBaseCostPerKwh + taxasGerais;
+
   const economia = valorSemDesconto - totalAPagar;
 
+  const pctEconomia = valorSemDesconto > 0
+    ? ((economia / valorSemDesconto) * 100).toFixed(1).replace('.', ',')
+    : '0,0';
+
   const margin = 50;
+
+  const gap = {
+    sectionAfterTitle: 12,
+    sectionBreak: 22,
+    row: 18,
+    rowWithSub: 24,
+    subLabelOffset: 13,
+    beforeLine: 6,
+  };
+
   let y = height - margin;
 
-  // ── Helper functions ──
   const drawText = (
     text: string,
     x: number,
@@ -94,7 +127,10 @@ export async function generateMemberInvoice({
     });
   };
 
-  const drawLine = (yPos: number, color: Color = COLORS.lightGray) => {
+  const drawLine = (
+    yPos: number,
+    color: Color = COLORS.lightGray,
+  ) => {
     page.drawLine({
       start: { x: margin, y: yPos },
       end: { x: width - margin, y: yPos },
@@ -103,171 +139,661 @@ export async function generateMemberInvoice({
     });
   };
 
-  const drawRect = (x: number, yPos: number, w: number, h: number, color: Color) => {
-    page.drawRectangle({ x, y: yPos, width: w, height: h, color });
+  const drawRect = (
+    x: number,
+    yPos: number,
+    w: number,
+    h: number,
+    color: Color,
+  ) => {
+    page.drawRectangle({
+      x,
+      y: yPos,
+      width: w,
+      height: h,
+      color,
+    });
   };
 
   // ── Header ──
-  drawRect(0, height - 80, width, 80, COLORS.primary);
-  drawText('FATURA DE CRÉDITOS SOLARES', margin, height - 35, {
-    size: 20, bold: true, color: COLORS.white,
-  });
-  drawText(ownerName, margin, height - 55, {
-    size: 11, color: COLORS.white,
-  });
+  drawRect(
+    0,
+    height - 80,
+    width,
+    80,
+    COLORS.primary,
+  );
+
+  drawText(
+    'FATURA DE CRÉDITOS SOLARES',
+    margin,
+    height - 35,
+    {
+      size: 20,
+      bold: true,
+      color: COLORS.white,
+    },
+  );
+
+  drawText(
+    ownerName,
+    margin,
+    height - 55,
+    {
+      size: 11,
+      color: COLORS.white,
+    },
+  );
 
   y = height - 110;
 
-  // ── Client info + invoice details ──
-  drawText('CLIENTE', margin, y, { size: 8, bold: true, color: COLORS.gray });
+  drawText(
+    'CLIENTE',
+    margin,
+    y,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
+
   y -= 16;
-  drawText(member.name, margin, y, { size: 12, bold: true });
+
+  drawText(
+    member.name,
+    margin,
+    y,
+    {
+      size: 12,
+      bold: true,
+    },
+  );
+
   y -= 14;
+
   if (member.address) {
-    drawText(member.address, margin, y, { size: 9, color: COLORS.gray });
+    drawText(
+      member.address,
+      margin,
+      y,
+      {
+        size: 9,
+        color: COLORS.gray,
+      },
+    );
+
     y -= 14;
   }
 
-  // Right side: invoice info
   const rightX = width - margin - 180;
-  drawText('REFERENCIA', rightX, height - 110, {
-    size: 8, bold: true, color: COLORS.gray,
-  });
-  drawText(formatMonthLabel(monthKey), rightX, height - 126, {
-    size: 12, bold: true,
-  });
 
-  y -= 10;
+  drawText(
+    'REFERENCIA',
+    rightX,
+    height - 110,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
+
+  drawText(
+    formatMonthLabel(monthKey),
+    rightX,
+    height - 126,
+    {
+      size: 12,
+      bold: true,
+    },
+  );
+
+  y -= 8;
   drawLine(y);
-  y -= 25;
+  y -= 15;
 
   // ── Main Amount ──
-  drawRect(margin, y - 16, width - 2 * margin, 50, rgb(0.95, 0.97, 1));
-  drawText('VALOR A PAGAR', margin + 12, y + 12, {
-    size: 10, bold: true, color: COLORS.primary,
-  });
-  drawText(formatCurrency(totalAPagar), width - margin - 130, y + 9, {
-    size: 18, bold: true, color: COLORS.primary,
-  });
+  drawRect(
+    margin,
+    y - 16,
+    width - 2 * margin,
+    50,
+    rgb(0.95, 0.97, 1),
+  );
+
+  drawText(
+    'VALOR A PAGAR',
+    margin + 12,
+    y + 12,
+    {
+      size: 10,
+      bold: true,
+      color: COLORS.primary,
+    },
+  );
+
+  drawText(
+    formatCurrency(totalAPagar),
+    width - margin - 130,
+    y + 9,
+    {
+      size: 18,
+      bold: true,
+      color: COLORS.primary,
+    },
+  );
 
   y -= 50;
-  y -= 20;
+  y -= 10;
 
   // ── Invoice Details Table ──
-  drawText('DETALHAMENTO DA FATURA', margin, y, {
-    size: 11, bold: true, color: COLORS.primary,
-  });
-  y -= 5;
-  drawLine(y, COLORS.primary);
-  y -= 20;
+  drawText(
+    'DETALHAMENTO DA FATURA',
+    margin,
+    y,
+    {
+      size: 11,
+      bold: true,
+      color: COLORS.primary,
+    },
+  );
 
-  // Table column positions
+  if (isGd1) {
+    drawText(
+      'Cobrado como GD1',
+      width - margin - 85,
+      y + 1,
+      {
+        size: 7,
+        color: COLORS.gray,
+      },
+    );
+  }
+
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.primary);
+  y -= gap.sectionAfterTitle;
+
   const colQty = 270;
   const colUnit = 360;
   const colVal = width - margin - 70;
 
-  // Table header
-  drawText('Descrição', margin, y, { size: 8, bold: true, color: COLORS.gray });
-  drawText('Quantidade', colQty, y, { size: 8, bold: true, color: COLORS.gray });
-  drawText('Preço unit.', colUnit, y, { size: 8, bold: true, color: COLORS.gray });
-  drawText('Valor', colVal, y, { size: 8, bold: true, color: COLORS.gray });
-  y -= 5;
-  drawLine(y, COLORS.lightGray);
-  y -= 18;
+  drawText(
+    'Descrição',
+    margin,
+    y,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
 
-  // Row: energy credits
-  drawText('Energia compensada (créditos solares)', margin, y, { size: 10 });
-  drawText(`${consumo} kWh`, colQty, y, { size: 10 });
-  drawText(`${formatCurrency(energyValue)}/kWh`, colUnit, y, { size: 9 });
-  drawText(formatCurrency(valorCreditos), colVal, y, { size: 10 });
-  y -= 5;
+  drawText(
+    'Quantidade',
+    colQty,
+    y,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
+
+  drawText(
+    'Preço unit.',
+    colUnit,
+    y,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
+
+  drawText(
+    'Valor',
+    colVal,
+    y,
+    {
+      size: 8,
+      bold: true,
+      color: COLORS.gray,
+    },
+  );
+
+  y -= gap.beforeLine;
   drawLine(y, COLORS.lightGray);
-  y -= 18;
+  y -= gap.row;
 
   if (consumoNaoCompensado > 0) {
-    drawText('Energia nao compensada (alem do limite Enel)', margin, y, { size: 10, color: COLORS.gray });
-    drawText(`${consumoNaoCompensado} kWh`, colQty, y, { size: 10, color: COLORS.gray });
-    drawText('—', colUnit, y, { size: 9, color: COLORS.gray });
-    drawText('—', colVal, y, { size: 10, color: COLORS.gray });
-    y -= 5;
+    drawText(
+      'Consumo total',
+      margin,
+      y,
+      {
+        size: 10,
+        bold: true,
+      },
+    );
+
+    drawText(
+      `${consumoTotal} kWh`,
+      colQty,
+      y,
+      {
+        size: 10,
+        bold: true,
+      },
+    );
+
+    drawText(
+      '—',
+      colUnit,
+      y,
+      {
+        size: 9,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      '—',
+      colVal,
+      y,
+      {
+        size: 10,
+        color: COLORS.gray,
+      },
+    );
+
+    y -= gap.beforeLine;
     drawLine(y, COLORS.lightGray);
-    y -= 18;
+    y -= gap.row;
+
+    const valorNaoCompensado =
+      consumoNaoCompensado * enelBaseCostPerKwh;
+
+    drawText(
+      'Energia nao compensada',
+      margin,
+      y,
+      {
+        size: 10,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      'Mínimo exigido fornecimento próprio Enel',
+      margin,
+      y - gap.subLabelOffset,
+      {
+        size: 7,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      `${consumoNaoCompensado} kWh`,
+      colQty,
+      y,
+      {
+        size: 10,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      `${formatCurrency(enelBaseCostPerKwh)}/kWh`,
+      colUnit,
+      y,
+      {
+        size: 9,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      formatCurrency(valorNaoCompensado),
+      colVal,
+      y,
+      {
+        size: 10,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      'Cobrado pela Enel',
+      colVal,
+      y - gap.subLabelOffset,
+      {
+        size: 7,
+        color: COLORS.red,
+      },
+    );
+
+    y -= gap.rowWithSub;
+    drawLine(y, COLORS.lightGray);
+    y -= gap.row;
   }
 
-  // Row: total Enel charges (parent row)
-  if (taxas !== 0) {
-    drawText('Cobrado pela Enel', margin, y, { size: 10, bold: true });
-    drawText(formatCurrency(taxas), colVal, y, { size: 10, bold: true });
-    y -= 5;
+  drawText(
+    'Energia compensada',
+    margin,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    'Geração solar',
+    margin,
+    y - gap.subLabelOffset,
+    {
+      size: 7,
+      color: COLORS.gray,
+    },
+  );
+
+  drawText(
+    `${consumo} kWh`,
+    colQty,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    `${formatCurrency(chargedRatePerKwh)}/kWh`,
+    colUnit,
+    y,
+    {
+      size: 9,
+    },
+  );
+
+  drawText(
+    formatCurrency(valorCreditos),
+    colVal,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    `Parte da Enel: ${formatCurrency(enelPartCreditos)}`,
+    colVal,
+    y - gap.subLabelOffset,
+    {
+      size: 7,
+      color: COLORS.red,
+    },
+  );
+
+  y -= gap.rowWithSub;
+  drawLine(y, COLORS.lightGray);
+  y -= gap.row;
+
+  if (taxasGerais !== 0) {
+    drawText(
+      'Demais encargos Enel',
+      margin,
+      y,
+      {
+        size: 10,
+        bold: true,
+      },
+    );
+
+    drawText(
+      'CIP, ilum. publica, etc.',
+      colQty,
+      y,
+      {
+        size: 8,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      formatCurrency(taxasGerais),
+      colVal,
+      y,
+      {
+        size: 10,
+        bold: true,
+      },
+    );
+
+    y -= gap.beforeLine;
     drawLine(y, COLORS.lightGray);
-    y -= 18;
-
-    const indent = margin + 15;
-
-    if (distributionFeePerKwh && consumo > 0) {
-      drawText('Taxa de distribuição', indent, y, { size: 9, color: COLORS.gray });
-      drawText(`${consumo} kWh`, colQty, y, { size: 9, color: COLORS.gray });
-      drawText(`${formatCurrency(distributionFeePerKwh)}/kWh`, colUnit, y, { size: 8, color: COLORS.gray });
-      drawText(formatCurrency(taxaDistribuicao), colVal, y, { size: 9, color: COLORS.gray });
-      y -= 5;
-      drawLine(y, COLORS.lightGray);
-      y -= 18;
-
-      if (taxasGerais > 0) {
-        drawText('Demais taxas (est.)', indent, y, { size: 9, color: COLORS.gray });
-        drawText('CIP, ilum. publica, etc.', colQty, y, { size: 8, color: COLORS.gray });
-        drawText(formatCurrency(taxasGerais), colVal, y, { size: 9, color: COLORS.gray });
-        y -= 5;
-        drawLine(y, COLORS.lightGray);
-        y -= 18;
-      }
-    }
+    y -= gap.row;
   }
 
-  // Total row
-  drawRect(margin, y - 5, width - 2 * margin, 22, rgb(0.93, 0.95, 0.98));
-  drawText('Total', margin + 5, y, { size: 10, bold: true });
-  drawText(formatCurrency(totalAPagar), colVal, y, {
-    size: 10, bold: true,
-  });
+   // ── Total ──
+  const totalBoxHeight = taxasEnel !== 0 ? 40 : 22;
 
-  y -= 45;
+  drawRect(
+    margin,
+    y - totalBoxHeight + 15,
+    width - 2 * margin,
+    totalBoxHeight,
+    rgb(0.93, 0.95, 0.98),
+  );
+
+  drawText(
+    'Total',
+    margin + 5,
+    y,
+    {
+      size: 10,
+      bold: true,
+    },
+  );
+
+  drawText(
+    formatCurrency(totalAPagar),
+    colVal,
+    y,
+    {
+      size: 10,
+      bold: true,
+    },
+  );
+
+  if (taxasEnel !== 0) {
+    drawText(
+      `Repasse para Enel: ${formatCurrency(enelBill.total)} (Energia + TUSD + encargos)`,
+      margin + 5,
+      y - 14,
+      {
+        size: 8,
+        color: COLORS.gray,
+      },
+    );
+  }
+
+  y -= totalBoxHeight + 2;
 
   // ── Savings Comparison ──
-  drawText('DEMONSTRATIVO DE ECONOMIA', margin, y, {
-    size: 11, bold: true, color: COLORS.primary,
-  });
-  y -= 5;
-  drawLine(y, COLORS.primary);
-  y -= 20;
+  drawText(
+    'DEMONSTRATIVO DE ECONOMIA',
+    margin,
+    y,
+    {
+      size: 11,
+      bold: true,
+      color: COLORS.primary,
+    },
+  );
 
-  // Without solar
-  drawText('Valor total SEM créditos solares', margin, y, { size: 10 });
-  drawText(`${consumo} kWh x ${formatCurrency(enelTariff - distFee)} + ${formatCurrency(taxas)}`, 250, y, {
-    size: 8, color: COLORS.gray,
-  });
-  drawText(formatCurrency(valorSemDesconto), colVal, y, { size: 10 });
-  y -= 5;
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.primary);
+  y -= gap.sectionAfterTitle;
+
+  drawText(
+    'Tarifa Enel',
+    margin,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    `${formatCurrency(enelBaseCostPerKwh)}/kWh`,
+    colVal,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  y -= gap.beforeLine;
   drawLine(y, COLORS.lightGray);
+  y -= gap.row;
+
+  drawText(
+    'Tarifa solar',
+    margin,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    `${formatCurrency(chargedRatePerKwh)}/kWh`,
+    colVal,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.lightGray);
+  y -= gap.row;
+
+  drawText(
+    'Desconto por kWh',
+    margin,
+    y,
+    {
+      size: 10,
+      color: COLORS.green,
+    },
+  );
+
+  drawText(
+    `${formatCurrency(pricing.discountPerKwh)}/kWh`,
+    colVal,
+    y,
+    {
+      size: 10,
+      color: COLORS.green,
+    },
+  );
+
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.lightGray);
+  y -= gap.row;
+
+  drawText(
+    'Valor total SEM creditos solares',
+    margin,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    `${consumoTotal} kWh x ${formatCurrency(enelBaseCostPerKwh)} + ${formatCurrency(taxasGerais)}`,
+    250,
+    y,
+    {
+      size: 8,
+      color: COLORS.gray,
+    },
+  );
+
+  drawText(
+    formatCurrency(valorSemDesconto),
+    colVal,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.lightGray);
+  y -= gap.row;
+
+  drawText(
+    'Valor total COM creditos solares',
+    margin,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  drawText(
+    formatCurrency(totalAPagar),
+    colVal,
+    y,
+    {
+      size: 10,
+    },
+  );
+
+  y -= gap.beforeLine;
+  drawLine(y, COLORS.lightGray);
+
+  // ── Economy Summary ──
   y -= 18;
 
-  // With solar
-  drawText('Valor total COM créditos solares', margin, y, { size: 10 });
-  drawText(formatCurrency(totalAPagar), colVal, y, { size: 10 });
-  y -= 5;
-  drawLine(y, COLORS.lightGray);
-  y -= 30;
+  const economyBoxHeight = 42;
 
-  // Savings highlight
-  drawRect(margin, y - 8, width - 2 * margin, 35, rgb(0.9, 0.97, 0.92));
-  drawText('ECONOMIA NO MES', margin + 10, y + 8, {
-    size: 10, bold: true, color: COLORS.green,
-  });
-  drawText(formatCurrency(economia), width - margin - 110, y + 5, {
-    size: 16, bold: true, color: COLORS.green,
-  });
+  drawRect(
+    margin,
+    y - economyBoxHeight,
+    width - 2 * margin,
+    economyBoxHeight,
+    rgb(0.9, 0.97, 0.92),
+  );
 
-  y -= 70;
+  drawText(
+    'ECONOMIA NO MÊS',
+    margin + 10,
+    y - 18,
+    {
+      size: 10,
+      bold: true,
+      color: COLORS.green,
+    },
+  );
+
+  drawText(
+    `${formatCurrency(economia)} (${pctEconomia}%)`,
+    width - margin - 155,
+    y - 22,
+    {
+      size: 16,
+      bold: true,
+      color: COLORS.green,
+    },
+  );
+
+  y -= economyBoxHeight + 10;
 
   // ── PIX Payment QR Code ──
   if (pix && totalAPagar > 0) {
@@ -276,9 +802,14 @@ export async function generateMemberInvoice({
     const boxWidth = width - 2 * margin;
     const boxHeight = qrSize + boxPadding * 2;
 
-    drawRect(margin, y - boxHeight, boxWidth, boxHeight, rgb(0.96, 0.97, 1));
+    drawRect(
+      margin,
+      y - boxHeight,
+      boxWidth,
+      boxHeight,
+      rgb(0.96, 0.97, 1),
+    );
 
-    // Border
     page.drawRectangle({
       x: margin,
       y: y - boxHeight,
@@ -292,7 +823,6 @@ export async function generateMemberInvoice({
     const qrX = margin + boxPadding;
     const qrY = y - boxHeight + boxPadding;
 
-    // Generate and embed QR code
     const qrPngBytes = await generatePixQrCodePng({
       pixKey: pix.key,
       merchantName: pix.merchantName,
@@ -301,6 +831,7 @@ export async function generateMemberInvoice({
     });
 
     const qrImage = await pdfDoc.embedPng(qrPngBytes);
+
     page.drawImage(qrImage, {
       x: qrX,
       y: qrY,
@@ -308,75 +839,84 @@ export async function generateMemberInvoice({
       height: qrSize,
     });
 
-    // Text beside the QR code
     const textX = qrX + qrSize + 20;
     const textStartY = qrY + qrSize - 5;
 
-    drawText('PAGAMENTO VIA PIX', textX, textStartY, {
-      size: 12, bold: true, color: COLORS.primary,
-    });
-    drawText('Escaneie o QR Code ao lado com o', textX, textStartY - 20, {
-      size: 9, color: COLORS.gray,
-    });
-    drawText('aplicativo do seu banco.', textX, textStartY - 32, {
-      size: 9, color: COLORS.gray,
-    });
+    drawText(
+      'PAGAMENTO VIA PIX',
+      textX,
+      textStartY,
+      {
+        size: 12,
+        bold: true,
+        color: COLORS.primary,
+      },
+    );
 
-    drawText('Valor:', textX, textStartY - 52, {
-      size: 9, bold: true, color: COLORS.dark,
-    });
-    drawText(formatCurrency(totalAPagar), textX + 35, textStartY - 52, {
-      size: 11, bold: true, color: COLORS.primary,
-    });
+    drawText(
+      'Escaneie o QR Code ao lado com o',
+      textX,
+      textStartY - 20,
+      {
+        size: 9,
+        color: COLORS.gray,
+      },
+    );
 
-    drawText(`Chave: ${pix.key}`, textX, textStartY - 70, {
-      size: 7, color: COLORS.gray,
-    });
-    drawText(`Beneficiario: ${pix.merchantName}`, textX, textStartY - 82, {
-      size: 7, color: COLORS.gray,
-    });
+    drawText(
+      'aplicativo do seu banco.',
+      textX,
+      textStartY - 32,
+      {
+        size: 9,
+        color: COLORS.gray,
+      },
+    );
 
-    y -= boxHeight + 25;
+    drawText(
+      'Valor:',
+      textX,
+      textStartY - 52,
+      {
+        size: 9,
+        bold: true,
+        color: COLORS.dark,
+      },
+    );
+
+    drawText(
+      formatCurrency(totalAPagar),
+      textX + 35,
+      textStartY - 52,
+      {
+        size: 11,
+        bold: true,
+        color: COLORS.primary,
+      },
+    );
+
+    drawText(
+      `Chave: ${pix.key}`,
+      textX,
+      textStartY - 70,
+      {
+        size: 7,
+        color: COLORS.gray,
+      },
+    );
+
+    drawText(
+      `Beneficiario: ${pix.merchantName}`,
+      textX,
+      textStartY - 82,
+      {
+        size: 7,
+        color: COLORS.gray,
+      },
+    );
+
+    y -= boxHeight + 12;
   }
-
-  // ── Calculation details ──
-  drawText('CALCULO', margin, y, { size: 9, bold: true, color: COLORS.gray });
-  y -= 15;
-  drawText(`Consumo compensado: ${consumo} kWh`, margin, y, {
-    size: 8, color: COLORS.gray,
-  });
-  y -= 12;
-  if (consumoNaoCompensado > 0) {
-    drawText(`Energia nao compensada: ${consumoNaoCompensado} kWh`, margin, y, {
-      size: 8, color: COLORS.gray,
-    });
-    y -= 12;
-  }
-  drawText(`Valor por kWh (créditos solares): ${formatCurrency(energyValue)}`, margin, y, {
-    size: 8, color: COLORS.gray,
-  });
-  y -= 12;
-  drawText(`Tarifa Enel (referencia): ${formatCurrency(enelTariff)}/kWh`, margin, y, {
-    size: 8, color: COLORS.gray,
-  });
-  y -= 12;
-  const enelEnergyOnly = enelTariff - distFee;
-  const pctEnergy = enelEnergyOnly > 0
-    ? (((enelEnergyOnly - energyValue) / enelEnergyOnly) * 100).toFixed(1)
-    : '0.0';
-  const pctEconomia = valorSemDesconto > 0
-    ? ((economia / valorSemDesconto) * 100).toFixed(1)
-    : '0.0';
-  drawText(`Economia valor energia: ${pctEnergy}%`, margin, y, {
-    size: 8, color: COLORS.gray,
-  });
-  drawText(`Economia total na fatura: ${pctEconomia}%`, margin + 200, y, {
-    size: 8, color: COLORS.gray,
-  });
-
-  // ── Footer ──
-  y -= 20;
-  drawLine(y, COLORS.lightGray);
 
   return pdfDoc.save();
 }

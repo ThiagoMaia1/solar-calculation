@@ -9,6 +9,7 @@ import type {
   ComputedCosts,
   MonthGains,
   ComputedMonthValues,
+  Settings,
 } from '../types';
 
 /**
@@ -44,17 +45,181 @@ export function getEquipmentWithDepreciation(
   };
 }
 
+export interface MemberBillingOptions {
+  distributionFeePerKwh?: number;
+  gd1DistributionFeePerKwh?: number;
+  /** Enel rate per kWh for non-compensated energy — used to split taxas */
+  enelBaseCostPerKwh?: number;
+}
+
+export interface MonthPricing {
+  discountPerKwh: number;
+  chargedRatePerKwh: number;
+  profitPerKwh: number;
+}
+
+/**
+ * Resolve customer-facing and internal pricing from month data.
+ * Legacy months store energyValue (profit margin); new months store discountPerKwh.
+ */
+export function resolveMonthPricing(
+  monthData: Pick<MonthData, 'discountPerKwh' | 'energyValue' | 'enelBaseCostPerKwh'>,
+  settings: Pick<Settings, 'distributionFeePerKwh'>,
+): MonthPricing {
+  const enelBase = monthData.enelBaseCostPerKwh ?? 0;
+  const distFee = settings.distributionFeePerKwh ?? 0;
+
+  let discountPerKwh = monthData.discountPerKwh;
+  if (discountPerKwh == null) {
+    if (monthData.energyValue != null) {
+      discountPerKwh = enelBase - monthData.energyValue - distFee;
+    } else {
+      discountPerKwh = 0;
+    }
+  }
+
+  const chargedRatePerKwh = enelBase - discountPerKwh;
+  const profitPerKwh = chargedRatePerKwh - distFee;
+
+  return { discountPerKwh, chargedRatePerKwh, profitPerKwh };
+}
+
+export function resolveEnelBaseCostPerKwh(
+  monthData: Pick<MonthData, 'enelBaseCostPerKwh'>,
+): number {
+  return monthData.enelBaseCostPerKwh ?? 0;
+}
+
+/**
+ * Backfill enelBaseCostPerKwh from legacy settings.enelTariff, then remove enelTariff.
+ */
+export function migrateEnelBaseCost(
+  data: AppData,
+): { data: AppData; changed: boolean } {
+  const legacyTariff = (data.settings as Settings & { enelTariff?: number }).enelTariff;
+  let changed = false;
+  const months = { ...data.months };
+
+  if (legacyTariff != null) {
+    for (const [monthKey, month] of Object.entries(data.months)) {
+      if (month.enelBaseCostPerKwh != null) continue;
+      months[monthKey] = { ...month, enelBaseCostPerKwh: legacyTariff };
+      changed = true;
+    }
+  }
+
+  if ('enelTariff' in data.settings) {
+    const { enelTariff: _, ...restSettings } = data.settings as Settings & { enelTariff?: number };
+    return {
+      data: { ...data, settings: restSettings as Settings, months },
+      changed: true,
+    };
+  }
+
+  return changed ? { data: { ...data, months }, changed: true } : { data, changed: false };
+}
+
+/**
+ * Backfill discountPerKwh from legacy energyValue without removing historical data.
+ */
+export function migrateMonthDiscounts(
+  data: AppData,
+): { data: AppData; changed: boolean } {
+  let changed = false;
+  const months = { ...data.months };
+
+  for (const [monthKey, month] of Object.entries(data.months)) {
+    if (month.discountPerKwh != null || month.energyValue == null) continue;
+
+    const { discountPerKwh } = resolveMonthPricing(month, data.settings);
+    months[monthKey] = { ...month, discountPerKwh };
+    changed = true;
+  }
+
+  return changed ? { data: { ...data, months }, changed: true } : { data, changed: false };
+}
+
+function getMemberDistributionFee(
+  memberCredits: MemberCredits | undefined,
+  billingOptions?: MemberBillingOptions,
+): number {
+  const gd2DistFee = billingOptions?.distributionFeePerKwh ?? 0;
+  const gd1DistFee = billingOptions?.gd1DistributionFeePerKwh ?? 0;
+  if (memberCredits?.gd1 && gd1DistFee > 0) return gd1DistFee;
+  return gd2DistFee;
+}
+
+function getTaxasGerais(
+  consumo: number,
+  consumoNaoCompensado: number,
+  taxas: number,
+  memberCredits: MemberCredits | undefined,
+  billingOptions?: MemberBillingOptions,
+): number {
+  const { demaisEncargos } = getEnelBillComponents(
+    consumo,
+    consumoNaoCompensado,
+    taxas,
+    memberCredits,
+    billingOptions,
+  );
+  return demaisEncargos;
+}
+
+export interface EnelBillBreakdown {
+  valorNaoCompensado: number;
+  tusdCompensada: number;
+  demaisEncargos: number;
+  total: number;
+}
+
+/** Split the Enel bill into non-compensated energy, compensated TUSD, and other fees. */
+export function getEnelBillBreakdown(
+  memberCredits: MemberCredits | undefined,
+  billingOptions?: MemberBillingOptions,
+): EnelBillBreakdown {
+  const consumo = memberCredits?.consumo ?? 0;
+  const consumoNaoCompensado = memberCredits?.consumoNaoCompensado ?? 0;
+  const taxas = memberCredits?.taxas ?? 0;
+  const components = getEnelBillComponents(
+    consumo,
+    consumoNaoCompensado,
+    taxas,
+    memberCredits,
+    billingOptions,
+  );
+  return { ...components, total: taxas };
+}
+
+function getEnelBillComponents(
+  consumo: number,
+  consumoNaoCompensado: number,
+  taxas: number,
+  memberCredits: MemberCredits | undefined,
+  billingOptions?: MemberBillingOptions,
+): Omit<EnelBillBreakdown, 'total'> {
+  const distFee = getMemberDistributionFee(memberCredits, billingOptions);
+  const enelBaseCostPerKwh = billingOptions?.enelBaseCostPerKwh ?? 0;
+  const valorNaoCompensado = consumoNaoCompensado * enelBaseCostPerKwh;
+  const tusdCompensada = consumo * distFee;
+  const demaisEncargos = Math.max(0, taxas - valorNaoCompensado - tusdCompensada);
+  return { valorNaoCompensado, tusdCompensada, demaisEncargos };
+}
+
 /**
  * Calculate results for a family member.
- * resultado = consumo × energyValue (the credit value)
- * cobrar = resultado + taxas (total to charge them)
+ * resultado = consumo × profitPerKwh (operator margin on compensated energy)
+ * cobrar = taxas + resultado (full Enel bill repasse + margin)
+ *
+ * taxasGerais = taxas − (consumoNaoCompensado × enelBaseCost) − (consumo × distFee)
  *
  * When taxas is 0 or missing, we skip the calculation because the Enel bill
  * data has not been entered yet and the result would be incorrect.
  */
 export function calculateMemberResults(
   memberCredits: MemberCredits | undefined,
-  energyValue: number,
+  pricing: MonthPricing,
+  billingOptions?: MemberBillingOptions,
 ): MemberResult {
   const consumo = memberCredits?.consumo ?? 0;
   const consumoNaoCompensado = memberCredits?.consumoNaoCompensado ?? 0;
@@ -62,12 +227,37 @@ export function calculateMemberResults(
 
   // Without taxes the calculation is incomplete — return zeros for computed fields
   if (taxas === 0) {
-    return { consumo, consumoNaoCompensado, taxas: 0, resultado: 0, cobrar: 0 };
+    return {
+      consumo,
+      consumoNaoCompensado,
+      taxas: 0,
+      taxasGerais: 0,
+      resultado: 0,
+      chargedRatePerKwh: pricing.chargedRatePerKwh,
+      profitPerKwh: pricing.profitPerKwh,
+      cobrar: 0,
+    };
   }
 
-  const resultado = consumo * energyValue;
-  const cobrar = resultado + taxas;
-  return { consumo, consumoNaoCompensado, taxas, resultado, cobrar };
+  const taxasGerais = getTaxasGerais(
+    consumo,
+    consumoNaoCompensado,
+    taxas,
+    memberCredits,
+    billingOptions,
+  );
+  const resultado = consumo * pricing.profitPerKwh;
+  const cobrar = taxas + resultado;
+  return {
+    consumo,
+    consumoNaoCompensado,
+    taxas,
+    taxasGerais,
+    resultado,
+    chargedRatePerKwh: pricing.chargedRatePerKwh,
+    profitPerKwh: pricing.profitPerKwh,
+    cobrar,
+  };
 }
 
 /**
@@ -106,19 +296,20 @@ export function calculateTotalCosts(costs: ComputedCosts): number {
 export function calculateMonthGains(
   monthData: MonthData,
   members: Member[],
-  energyValue: number,
+  pricing: MonthPricing,
+  billingOptions?: MemberBillingOptions,
 ): MonthGains {
   const economyEnergy = monthData.economyEnergy ?? 0;
-  const ganhoCreditos = (monthData.creditosCompensar ?? 0) * energyValue;
+  const ganhoCreditos = (monthData.creditosCompensar ?? 0) * pricing.profitPerKwh;
 
   let resultadoParentes = 0;
   for (const member of members) {
     const credits = monthData.credits?.[member.id] ?? { consumo: 0, taxas: 0 };
-    const { cobrar } = calculateMemberResults(credits, energyValue);
+    const { cobrar } = calculateMemberResults(credits, pricing, billingOptions);
     resultadoParentes += cobrar;
   }
 
-  const economiaPropria = (monthData.thiagoConsumo ?? 0) * energyValue;
+  const economiaPropria = (monthData.thiagoConsumo ?? 0) * pricing.profitPerKwh;
 
   return { economyEnergy, ganhoCreditos, resultadoParentes, economiaPropria };
 }
@@ -135,7 +326,12 @@ export function computeMonthValues(
 
   const { equipment, members, settings } = data;
   const monthIdx = getMonthIndex(monthKey, settings.startDate);
-  const energyValue = monthData.energyValue ?? 0;
+  const pricing = resolveMonthPricing(monthData, settings);
+  const billingOptions: MemberBillingOptions = {
+    distributionFeePerKwh: settings.distributionFeePerKwh,
+    gd1DistributionFeePerKwh: settings.gd1DistributionFeePerKwh,
+    enelBaseCostPerKwh: resolveEnelBaseCostPerKwh(monthData),
+  };
 
   // Equipment depreciation
   const equipDep = getEquipmentWithDepreciation(equipment, monthIdx);
@@ -149,7 +345,7 @@ export function computeMonthValues(
   let membersConsumption = 0;
   for (const m of members) {
     const credits = monthData.credits?.[m.id] ?? { consumo: 0, taxas: 0 };
-    memberResults[m.id] = calculateMemberResults(credits, energyValue);
+    memberResults[m.id] = calculateMemberResults(credits, pricing, billingOptions);
     membersConsumption += credits.consumo ?? 0;
   }
 
@@ -159,15 +355,15 @@ export function computeMonthValues(
   const energyRemainder = creditosCompensar - totalConsumption;
 
   // Gains
-  const gains = calculateMonthGains(monthData, members, energyValue);
+  const gains = calculateMonthGains(monthData, members, pricing, billingOptions);
   const totalGains =
     gains.economyEnergy +
     gains.ganhoCreditos +
     gains.resultadoParentes +
     gains.economiaPropria;
 
-  // Resultado mês = energy remainder × energy value - costs
-  const resultadoMes = energyRemainder * energyValue - totalCosts;
+  // Resultado mês = energy remainder × profit margin - costs
+  const resultadoMes = energyRemainder * pricing.profitPerKwh - totalCosts;
 
   // Para o balanço (cumulative energy balance × current energy value)
   const sortedKeys = Object.keys(data.months).sort();
@@ -182,12 +378,15 @@ export function computeMonthValues(
     }
     cumulativeBalance += monthGenerated - monthConsumed;
   }
-  const paraBalanco = cumulativeBalance * energyValue;
+  const paraBalanco = cumulativeBalance * pricing.profitPerKwh;
 
   return {
     monthKey,
     monthIdx,
-    energyValue,
+    discountPerKwh: pricing.discountPerKwh,
+    enelBaseCostPerKwh: resolveEnelBaseCostPerKwh(monthData),
+    chargedRatePerKwh: pricing.chargedRatePerKwh,
+    profitPerKwh: pricing.profitPerKwh,
     equipDep,
     costs,
     totalCosts,

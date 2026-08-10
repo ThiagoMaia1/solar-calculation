@@ -1,14 +1,36 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchData, saveAllData } from '../utils/api';
+import { migrateEnelBaseCost, migrateMonthDiscounts } from '../utils/calculations';
+import { ensureCostDefaults } from '../utils/costDefaults';
 import type { AppData, Member, MonthData, Settings } from '../types';
 
 export const QUERY_KEY = ['appData'] as const;
+
+function migrateSettings(settings: Settings): { settings: Settings; changed: boolean } {
+  const ensured = ensureCostDefaults(settings);
+  return {
+    settings: ensured,
+    changed: !settings.costDefaults,
+  };
+}
+
+async function fetchAndMigrateData(): Promise<AppData> {
+  const data = await fetchData();
+  const { data: baseMigrated, changed: baseChanged } = migrateEnelBaseCost(data);
+  const { data: discountMigrated, changed: discountChanged } = migrateMonthDiscounts(baseMigrated);
+  const { settings, changed: costDefaultsChanged } = migrateSettings(discountMigrated.settings);
+  const migrated: AppData = { ...discountMigrated, settings };
+  if (baseChanged || discountChanged || costDefaultsChanged) {
+    await saveAllData(migrated);
+  }
+  return migrated;
+}
 
 /** Shared query – fetches the full AppData from JSONBin */
 export function useAppData() {
   return useQuery<AppData>({
     queryKey: QUERY_KEY,
-    queryFn: fetchData,
+    queryFn: fetchAndMigrateData,
   });
 }
 

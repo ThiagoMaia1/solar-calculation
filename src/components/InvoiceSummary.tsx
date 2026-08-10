@@ -1,19 +1,31 @@
-import { formatMonthLabel, formatBRL, calculateMemberResults } from '../utils/calculations';
-import type { Member, MonthData } from '../types';
+import {
+  formatMonthLabel,
+  formatBRL,
+  calculateMemberResults,
+  resolveEnelBaseCostPerKwh,
+  resolveMonthPricing,
+} from '../utils/calculations';
+import type { Member, MonthData, Settings } from '../types';
 
 interface InvoiceSummaryProps {
   member: Member;
   monthData: MonthData;
   monthKey: string;
+  settings: Settings;
 }
 
-export default function InvoiceSummary({ member, monthData, monthKey }: InvoiceSummaryProps) {
+export default function InvoiceSummary({ member, monthData, monthKey, settings }: InvoiceSummaryProps) {
   const memberCredits = monthData.credits?.[member.id];
-  const energyValue = monthData.energyValue ?? 0;
 
   if (!memberCredits) return null;
 
-  const result = calculateMemberResults(memberCredits, energyValue);
+  const pricing = resolveMonthPricing(monthData, settings);
+  const enelBaseCostPerKwh = resolveEnelBaseCostPerKwh(monthData);
+  const result = calculateMemberResults(memberCredits, pricing, {
+    distributionFeePerKwh: settings.distributionFeePerKwh,
+    gd1DistributionFeePerKwh: settings.gd1DistributionFeePerKwh,
+    enelBaseCostPerKwh,
+  });
   const hasTaxas = (memberCredits.taxas ?? 0) !== 0;
 
   return (
@@ -26,16 +38,27 @@ export default function InvoiceSummary({ member, monthData, monthKey }: InvoiceS
       </p>
       {result.consumoNaoCompensado > 0 && (
         <p className="text-gray-600">
-          Energia não compensada: <span className="font-medium">{result.consumoNaoCompensado} kWh</span>
+          Energia não compensada:{' '}
+          <span className="font-medium">
+            {result.consumoNaoCompensado} kWh × {formatBRL(enelBaseCostPerKwh)}/kWh ={' '}
+            {formatBRL(result.consumoNaoCompensado * enelBaseCostPerKwh)}
+          </span>
         </p>
       )}
       {hasTaxas ? (
         <>
           <p className="text-gray-600">
-            Valor créditos: <span className="font-medium">{formatBRL(result.resultado)}</span>
+            Tarifa créditos (total):{' '}
+            <span className="font-medium">{formatBRL(result.chargedRatePerKwh)}/kWh</span>
           </p>
           <p className="text-gray-600">
-            Taxas: <span className="font-medium">{formatBRL(result.taxas)}</span>
+            Margem créditos: <span className="font-medium">{formatBRL(result.resultado)}</span>
+          </p>
+          <p className="text-gray-600">
+            Fatura Enel (repasse): <span className="font-medium">{formatBRL(result.taxas)}</span>
+          </p>
+          <p className="text-gray-600">
+            Demais encargos Enel: <span className="font-medium">{formatBRL(result.taxasGerais)}</span>
           </p>
           <p className="text-gray-800 font-bold">
             Total a cobrar: {formatBRL(result.cobrar)}

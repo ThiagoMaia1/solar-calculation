@@ -8,6 +8,11 @@ import {
   calculateTotalCosts,
   calculateMonthGains,
   computeMonthValues,
+  resolveMonthPricing,
+  resolveEnelBaseCostPerKwh,
+  getEnelBillBreakdown,
+  migrateEnelBaseCost,
+  migrateMonthDiscounts,
   formatBRL,
   formatNumber,
   formatMonthLabel,
@@ -36,7 +41,8 @@ const members: Member[] = [
 
 function makeMonthData(overrides: Partial<MonthData> = {}): MonthData {
   return {
-    energyValue: 0.75,
+    discountPerKwh: 0.30,
+    enelBaseCostPerKwh: 1.05,
     costs: {
       internet: 100,
       seguro: 50,
@@ -61,11 +67,17 @@ function makeMonthData(overrides: Partial<MonthData> = {}): MonthData {
 function makeAppData(monthsMap: Record<string, MonthData> = {}): AppData {
   return {
     equipment,
-    settings: { enelTariff: 1.05, startDate: '2024-01' },
+    settings: { startDate: '2024-01', distributionFeePerKwh: 0 },
     members,
     months: monthsMap,
   };
 }
+
+const defaultPricing = {
+  discountPerKwh: 0.30,
+  chargedRatePerKwh: 0.75,
+  profitPerKwh: 0.75,
+};
 
 // ──────────────────────────────────────────────
 // getMonthIndex
@@ -174,20 +186,116 @@ describe('getEquipmentWithDepreciation', () => {
 });
 
 // ──────────────────────────────────────────────
+// resolveMonthPricing
+// ──────────────────────────────────────────────
+describe('resolveMonthPricing', () => {
+  it('derives charged and profit rates from discount', () => {
+    const pricing = resolveMonthPricing(
+      { discountPerKwh: 0.22, enelBaseCostPerKwh: 0.98 },
+      { distributionFeePerKwh: 0.31 },
+    );
+    expect(pricing.chargedRatePerKwh).toBeCloseTo(0.76);
+    expect(pricing.profitPerKwh).toBeCloseTo(0.45);
+  });
+
+  it('migrates legacy energyValue to discount', () => {
+    const pricing = resolveMonthPricing(
+      { energyValue: 0.45, enelBaseCostPerKwh: 0.98 },
+      { distributionFeePerKwh: 0.31 },
+    );
+    expect(pricing.discountPerKwh).toBeCloseTo(0.22);
+    expect(pricing.chargedRatePerKwh).toBeCloseTo(0.76);
+    expect(pricing.profitPerKwh).toBeCloseTo(0.45);
+  });
+});
+
+// ──────────────────────────────────────────────
+// resolveEnelBaseCostPerKwh
+// ──────────────────────────────────────────────
+describe('resolveEnelBaseCostPerKwh', () => {
+  it('uses month value when set', () => {
+    expect(resolveEnelBaseCostPerKwh({ enelBaseCostPerKwh: 0.95 })).toBe(0.95);
+  });
+
+  it('returns 0 when month value is missing', () => {
+    expect(resolveEnelBaseCostPerKwh({})).toBe(0);
+  });
+});
+
+// ──────────────────────────────────────────────
+// migrateEnelBaseCost
+// ──────────────────────────────────────────────
+describe('migrateEnelBaseCost', () => {
+  it('backfills enelBaseCostPerKwh from legacy enelTariff and removes it from settings', () => {
+    const data = makeAppData({
+      '2024-01': makeMonthData({ enelBaseCostPerKwh: undefined }),
+      '2024-02': makeMonthData({ enelBaseCostPerKwh: 1.01 }),
+    });
+    (data.settings as { enelTariff?: number }).enelTariff = 0.95;
+
+    const { data: migrated, changed } = migrateEnelBaseCost(data);
+
+    expect(changed).toBe(true);
+    expect(migrated.months['2024-01']!.enelBaseCostPerKwh).toBe(0.95);
+    expect(migrated.months['2024-02']!.enelBaseCostPerKwh).toBe(1.01);
+    expect('enelTariff' in migrated.settings).toBe(false);
+  });
+});
+
+// ──────────────────────────────────────────────
+// migrateMonthDiscounts
+// ──────────────────────────────────────────────
+describe('migrateMonthDiscounts', () => {
+  it('backfills discountPerKwh while preserving energyValue', () => {
+    const data = makeAppData({
+      '2024-01': makeMonthData({ energyValue: 0.45, discountPerKwh: undefined }),
+      '2024-02': makeMonthData({ discountPerKwh: 0.22, energyValue: 0.45 }),
+    });
+    data.settings = {
+      ...data.settings,
+      distributionFeePerKwh: 0.31,
+    };
+    data.months['2024-01'] = makeMonthData({
+      energyValue: 0.45,
+      discountPerKwh: undefined,
+      enelBaseCostPerKwh: 0.98,
+    });
+
+    const { data: migrated, changed } = migrateMonthDiscounts(data);
+
+    expect(changed).toBe(true);
+    expect(migrated.months['2024-01']!.discountPerKwh).toBeCloseTo(0.22);
+    expect(migrated.months['2024-01']!.energyValue).toBe(0.45);
+    expect(migrated.months['2024-02']!.discountPerKwh).toBe(0.22);
+  });
+
+  it('returns unchanged data when all months already migrated', () => {
+    const data = makeAppData({
+      '2024-01': makeMonthData({ discountPerKwh: 0.22 }),
+    });
+
+    const { data: migrated, changed } = migrateMonthDiscounts(data);
+
+    expect(changed).toBe(false);
+    expect(migrated).toBe(data);
+  });
+});
+
+// ──────────────────────────────────────────────
 // calculateMemberResults
 // ──────────────────────────────────────────────
 describe('calculateMemberResults', () => {
   it('calculates resultado and cobrar correctly', () => {
     const credits: MemberCredits = { consumo: 200, taxas: 10 };
-    const result = calculateMemberResults(credits, 0.75);
+    const result = calculateMemberResults(credits, defaultPricing);
     expect(result.consumo).toBe(200);
     expect(result.taxas).toBe(10);
-    expect(result.resultado).toBe(150); // 200 * 0.75
-    expect(result.cobrar).toBe(160); // 150 + 10
+    expect(result.resultado).toBe(150); // 200 * 0.75 margin
+    expect(result.cobrar).toBe(160); // 10 + 150
   });
 
   it('returns zeros when credits are undefined', () => {
-    const result = calculateMemberResults(undefined, 0.75);
+    const result = calculateMemberResults(undefined, defaultPricing);
     expect(result.consumo).toBe(0);
     expect(result.consumoNaoCompensado).toBe(0);
     expect(result.taxas).toBe(0);
@@ -197,47 +305,141 @@ describe('calculateMemberResults', () => {
 
   it('passes through consumoNaoCompensado without affecting billing', () => {
     const credits: MemberCredits = { consumo: 200, taxas: 10, consumoNaoCompensado: 50 };
-    const result = calculateMemberResults(credits, 0.75);
+    const result = calculateMemberResults(credits, defaultPricing);
     expect(result.consumoNaoCompensado).toBe(50);
     expect(result.resultado).toBe(150);
     expect(result.cobrar).toBe(160);
   });
 
-  it('handles zero energy value', () => {
+  it('handles zero charged rate', () => {
     const credits: MemberCredits = { consumo: 200, taxas: 10 };
-    const result = calculateMemberResults(credits, 0);
+    const result = calculateMemberResults(credits, {
+      discountPerKwh: 1.05,
+      chargedRatePerKwh: 0,
+      profitPerKwh: 0,
+    });
     expect(result.resultado).toBe(0);
-    expect(result.cobrar).toBe(10); // only taxas
+    expect(result.cobrar).toBe(10);
   });
 
-  it('handles high energy value', () => {
+  it('handles high charged rate', () => {
     const credits: MemberCredits = { consumo: 100, taxas: 5 };
-    const result = calculateMemberResults(credits, 1.50);
+    const result = calculateMemberResults(credits, {
+      discountPerKwh: -0.45,
+      chargedRatePerKwh: 1.50,
+      profitPerKwh: 1.50,
+    });
     expect(result.resultado).toBe(150);
     expect(result.cobrar).toBe(155);
   });
 
   it('handles zero consumo with taxas', () => {
     const credits: MemberCredits = { consumo: 0, taxas: 25 };
-    const result = calculateMemberResults(credits, 0.75);
+    const result = calculateMemberResults(credits, defaultPricing);
     expect(result.resultado).toBe(0);
     expect(result.cobrar).toBe(25);
   });
 
   it('handles negative taxas', () => {
     const credits: MemberCredits = { consumo: 100, taxas: -10 };
-    const result = calculateMemberResults(credits, 0.75);
+    const result = calculateMemberResults(credits, defaultPricing);
     expect(result.resultado).toBe(75);
+    expect(result.taxasGerais).toBe(0);
     expect(result.cobrar).toBe(65);
   });
 
   it('returns zeros for resultado and cobrar when taxas is 0 (no taxes)', () => {
     const credits: MemberCredits = { consumo: 200, taxas: 0 };
-    const result = calculateMemberResults(credits, 0.75);
+    const result = calculateMemberResults(credits, defaultPricing);
     expect(result.consumo).toBe(200);
     expect(result.taxas).toBe(0);
     expect(result.resultado).toBe(0);
     expect(result.cobrar).toBe(0);
+  });
+
+  it('keeps GD2-equivalent margin when Enel bills as GD1', () => {
+    const pricing = {
+      discountPerKwh: 0.22,
+      chargedRatePerKwh: 0.76,
+      profitPerKwh: 0.45,
+    };
+    const gd1Credits: MemberCredits = { consumo: 200, taxas: 30, gd1: true };
+    const gd2Credits: MemberCredits = { consumo: 200, taxas: 66, gd1: false };
+    const billing = {
+      distributionFeePerKwh: 0.31,
+      gd1DistributionFeePerKwh: 0.13,
+    };
+
+    const gd1 = calculateMemberResults(gd1Credits, pricing, billing);
+    const gd2 = calculateMemberResults(gd2Credits, pricing, billing);
+
+    expect(gd1.resultado).toBeCloseTo(90);
+    expect(gd1.taxasGerais).toBeCloseTo(4);
+    expect(gd1.cobrar).toBeCloseTo(120);
+    expect(gd2.resultado).toBeCloseTo(90);
+    expect(gd2.cobrar).toBeCloseTo(156);
+  });
+
+  it('does not normalize GD1 when flag is false', () => {
+    const pricing = {
+      discountPerKwh: 0.22,
+      chargedRatePerKwh: 0.76,
+      profitPerKwh: 0.45,
+    };
+    const credits: MemberCredits = { consumo: 200, taxas: 30, gd1: false };
+    const result = calculateMemberResults(credits, pricing, {
+      distributionFeePerKwh: 0.31,
+      gd1DistributionFeePerKwh: 0.13,
+    });
+    expect(result.cobrar).toBeCloseTo(120);
+  });
+
+  it('subtracts non-compensated energy and distribution from taxas', () => {
+    const pricing = {
+      discountPerKwh: 0.28,
+      chargedRatePerKwh: 0.73,
+      profitPerKwh: 0.42,
+    };
+    const credits: MemberCredits = {
+      consumo: 168,
+      taxas: 170.12,
+      consumoNaoCompensado: 100,
+      gd1: true,
+    };
+    const result = calculateMemberResults(credits, pricing, {
+      distributionFeePerKwh: 0.31,
+      gd1DistributionFeePerKwh: 0.12,
+      enelBaseCostPerKwh: 1.01,
+    });
+
+    // 170.12 - (100 × 1.01) - (168 × 0.12) = 48.96
+    expect(result.taxasGerais).toBeCloseTo(48.96);
+    expect(result.resultado).toBeCloseTo(70.56);
+    expect(result.cobrar).toBeCloseTo(240.68);
+  });
+});
+
+// ──────────────────────────────────────────────
+// getEnelBillBreakdown
+// ──────────────────────────────────────────────
+describe('getEnelBillBreakdown', () => {
+  it('splits the Enel bill into non-compensated energy, TUSD, and other fees', () => {
+    const credits: MemberCredits = {
+      consumo: 168,
+      taxas: 170.12,
+      consumoNaoCompensado: 100,
+      gd1: true,
+    };
+    const breakdown = getEnelBillBreakdown(credits, {
+      distributionFeePerKwh: 0.31,
+      gd1DistributionFeePerKwh: 0.12,
+      enelBaseCostPerKwh: 1.01,
+    });
+
+    expect(breakdown.valorNaoCompensado).toBeCloseTo(101);
+    expect(breakdown.tusdCompensada).toBeCloseTo(20.16);
+    expect(breakdown.demaisEncargos).toBeCloseTo(48.96);
+    expect(breakdown.total).toBeCloseTo(170.12);
   });
 });
 
@@ -343,7 +545,7 @@ describe('calculateTotalCosts', () => {
 describe('calculateMonthGains', () => {
   it('calculates all gain components', () => {
     const monthData = makeMonthData();
-    const gains = calculateMonthGains(monthData, members, 0.75);
+    const gains = calculateMonthGains(monthData, members, defaultPricing);
 
     expect(gains.economyEnergy).toBe(50);
     expect(gains.ganhoCreditos).toBe(75); // 100 * 0.75
@@ -359,7 +561,7 @@ describe('calculateMonthGains', () => {
       thiagoConsumo: 0,
       credits: {},
     });
-    const gains = calculateMonthGains(monthData, members, 0.75);
+    const gains = calculateMonthGains(monthData, members, defaultPricing);
     expect(gains.economyEnergy).toBe(0);
     expect(gains.ganhoCreditos).toBe(0);
     expect(gains.resultadoParentes).toBe(0);
@@ -369,7 +571,7 @@ describe('calculateMonthGains', () => {
   it('calculates correctly with single member', () => {
     const singleMember: Member[] = [{ id: 'pai', name: 'Pai', address: 'Rua A' }];
     const monthData = makeMonthData();
-    const gains = calculateMonthGains(monthData, singleMember, 0.75);
+    const gains = calculateMonthGains(monthData, singleMember, defaultPricing);
 
     // Only pai: (200*0.75)+10 = 160
     expect(gains.resultadoParentes).toBe(160);
@@ -377,7 +579,7 @@ describe('calculateMonthGains', () => {
 
   it('calculates correctly with no members', () => {
     const monthData = makeMonthData();
-    const gains = calculateMonthGains(monthData, [], 0.75);
+    const gains = calculateMonthGains(monthData, [], defaultPricing);
     expect(gains.resultadoParentes).toBe(0);
     // Other gains remain
     expect(gains.economyEnergy).toBe(50);
@@ -387,7 +589,7 @@ describe('calculateMonthGains', () => {
 
   it('uses default credits for members without entries', () => {
     const monthData = makeMonthData({ credits: {} }); // no member credits
-    const gains = calculateMonthGains(monthData, members, 0.75);
+    const gains = calculateMonthGains(monthData, members, defaultPricing);
     // All members default to consumo:0, taxas:0 → cobrar:0 each
     expect(gains.resultadoParentes).toBe(0);
   });
@@ -410,7 +612,10 @@ describe('computeMonthValues', () => {
     expect(result).not.toBeNull();
     expect(result!.monthKey).toBe('2024-03');
     expect(result!.monthIdx).toBe(3); // March = month 3 from Jan start
-    expect(result!.energyValue).toBe(0.75);
+    expect(result!.discountPerKwh).toBe(0.30);
+    expect(result!.enelBaseCostPerKwh).toBe(1.05);
+    expect(result!.chargedRatePerKwh).toBe(0.75);
+    expect(result!.profitPerKwh).toBe(0.75);
 
     // Equipment depreciation at month 3
     expect(result!.equipDep.inversor).toBe(12000 - 100 * 3);
@@ -428,27 +633,27 @@ describe('computeMonthValues', () => {
     // Gains
     expect(result!.totalGains).toBeCloseTo(50 + 75 + 280.5 + 225);
 
-    // resultadoMes = energyRemainder × energyValue - totalCosts
+    // resultadoMes = energyRemainder × profitPerKwh - totalCosts
     expect(result!.resultadoMes).toBeCloseTo(
-      result!.energyRemainder * result!.energyValue - result!.totalCosts,
+      result!.energyRemainder * result!.profitPerKwh - result!.totalCosts,
     );
   });
 
   it('calculates cumulative paraBalanco across months', () => {
     const m1 = makeMonthData({ creditosCompensar: 100 });
-    const m2 = makeMonthData({ creditosCompensar: 50, energyValue: 0.80 });
+    const m2 = makeMonthData({ creditosCompensar: 50, discountPerKwh: 0.25 });
     const data = makeAppData({
       '2024-01': m1,
       '2024-02': m2,
     });
 
     const result = computeMonthValues('2024-02', data);
-    // cumulative balance: (100-650) + (50-650) = -1150, × current energyValue 0.80
+    // cumulative balance: (100-650) + (50-650) = -1150, × current profitPerKwh 0.80
     expect(result!.paraBalanco).toBeCloseTo(-1150 * 0.80);
   });
 
-  it('paraBalanco for the first month equals generated minus consumed × energyValue', () => {
-    const m1 = makeMonthData({ creditosCompensar: 80, energyValue: 0.60 });
+  it('paraBalanco for the first month equals generated minus consumed × profitPerKwh', () => {
+    const m1 = makeMonthData({ creditosCompensar: 80, discountPerKwh: 0.45 });
     const data = makeAppData({ '2024-01': m1 });
 
     const result = computeMonthValues('2024-01', data);
@@ -491,16 +696,20 @@ describe('computeMonthValues', () => {
     expect(result!.thiagoConsumo).toBe(400);
   });
 
-  it('uses 0 when energyValue is missing', () => {
-    const monthData = makeMonthData({ energyValue: undefined as unknown as number });
+  it('uses zero discount when pricing is missing', () => {
+    const monthData = makeMonthData({
+      discountPerKwh: undefined,
+      energyValue: undefined,
+      enelBaseCostPerKwh: 1.05,
+    });
     const data = makeAppData({ '2024-01': monthData });
     const result = computeMonthValues('2024-01', data);
 
-    expect(result!.energyValue).toBe(0);
-    // With taxas present (10 and 8), cobrar = resultado(0) + taxas
-    // pai: cobrar = (200*0)+10 = 10, mae: cobrar = (150*0)+8 = 8
-    // economyEnergy(50) + ganhoCreditos(0) + resultadoParentes(10+8=18) + economiaPropria(0)
-    expect(result!.totalGains).toBe(68);
+    expect(result!.discountPerKwh).toBe(0);
+    expect(result!.chargedRatePerKwh).toBe(1.05);
+    expect(result!.profitPerKwh).toBe(1.05);
+    expect(result!.memberResults['pai']!.cobrar).toBeCloseTo(220);
+    expect(result!.memberResults['mae']!.cobrar).toBeCloseTo(165.5);
   });
 
   it('handles data with no members', () => {

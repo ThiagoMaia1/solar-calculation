@@ -25,7 +25,7 @@ const sampleAppData: AppData = {
     inversor: { value: 12000, lifespanYears: 10 },
     placas: { value: 36000, lifespanYears: 25 },
   },
-  settings: { enelTariff: 1.05, startDate: '2024-01' },
+  settings: { startDate: '2024-01' },
   members: [{ id: 'pai', name: 'Pai', address: 'Rua A' }],
   months: {},
 };

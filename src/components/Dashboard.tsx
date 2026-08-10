@@ -108,7 +108,7 @@ export default function Dashboard() {
 
   if (!data) return null;
 
-  const { equipment, members, months } = data;
+  const { equipment, members, months, settings } = data;
   const sortedMonthKeys = Object.keys(months).sort();
   const dep = getMonthlyDepreciation(equipment);
   const totalEquipment = equipment.inversor.value + equipment.placas.value;
@@ -196,6 +196,7 @@ export default function Dashboard() {
           monthKey={editingMonth === '__new__' ? getNextMonthKey(months) : editingMonth}
           monthData={editingMonth === '__new__' ? null : months[editingMonth]}
           members={members}
+          settings={settings}
           onSave={handleSaveMonth}
           onClose={() => setEditingMonth(null)}
           saving={saveMonth.isPending}
